@@ -21,6 +21,7 @@ make ingest-sample
 make evaluate-baseline
 make ingest-trec-sample
 make validate-trec-sample
+make write-manifest-sample
 ```
 
 The initial sample commands use synthetic fixture data so they can run without downloading large benchmark corpora.
@@ -46,6 +47,24 @@ ctmatch validate-trec \
   --topics data/processed/trec/2021/topics.jsonl \
   --qrels data/processed/trec/2021/qrels.jsonl \
   --output outputs/trec_2021_validation.json
+
+ctmatch write-manifest \
+  --name trec_2021_topics \
+  --dataset trec_clinical_trials \
+  --year 2021 \
+  --parser trec_topics_xml \
+  --source-url https://trec.nist.gov/data/trials/topics2021.xml \
+  --input data/raw/trec/2021/topics2021.xml \
+  --output data/manifests/trec_2021_topics.json
+
+ctmatch write-manifest \
+  --name trec_2021_qrels \
+  --dataset trec_clinical_trials \
+  --year 2021 \
+  --parser trec_qrels \
+  --source-url https://trec.nist.gov/data/trials/qrels2021.txt \
+  --input data/raw/trec/2021/qrels2021.txt \
+  --output data/manifests/trec_2021_qrels.json
 ```
 
 To run the API after installing dependencies:

@@ -27,3 +27,6 @@ jobs:
           python -m clinical_trial_matching.cli ingest-trec-topics --year 2021 --input data/fixtures/topics2021.sample.xml --output data/processed/trec/2021/topics.jsonl
           python -m clinical_trial_matching.cli ingest-trec-qrels --year 2021 --input data/fixtures/qrels2021.sample.txt --output data/processed/trec/2021/qrels.jsonl
           python -m clinical_trial_matching.cli validate-trec --topics data/processed/trec/2021/topics.jsonl --qrels data/processed/trec/2021/qrels.jsonl --output outputs/sample_trec_validation.json
+      - name: Sample source manifest
+        run: |
+          python -m clinical_trial_matching.cli write-manifest --name sample_trec_2021_topics --dataset trec_clinical_trials --year 2021 --parser trec_topics_xml --source-url https://trec.nist.gov/data/trials/topics2021.xml --input data/fixtures/topics2021.sample.xml --output data/manifests/sample_trec_2021_topics.json --metadata fixture=synthetic

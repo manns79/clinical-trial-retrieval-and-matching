@@ -1,7 +1,7 @@
 PYTHON ?= python3
 PYTHONPATH ?= src
 
-.PHONY: install install-dev test compile ingest-sample evaluate-baseline ingest-trec-sample validate-trec-sample api docker-up docker-down clean
+.PHONY: install install-dev test compile ingest-sample evaluate-baseline ingest-trec-sample validate-trec-sample write-manifest-sample api docker-up docker-down clean
 
 install:
 	$(PYTHON) -m pip install -e .
@@ -43,6 +43,17 @@ validate-trec-sample:
 		--qrels data/processed/trec/2021/qrels.jsonl \
 		--output outputs/sample_trec_validation.json
 
+write-manifest-sample:
+	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m clinical_trial_matching.cli write-manifest \
+		--name sample_trec_2021_topics \
+		--dataset trec_clinical_trials \
+		--year 2021 \
+		--parser trec_topics_xml \
+		--source-url https://trec.nist.gov/data/trials/topics2021.xml \
+		--input data/fixtures/topics2021.sample.xml \
+		--output data/manifests/sample_trec_2021_topics.json \
+		--metadata fixture=synthetic
+
 api:
 	PYTHONPATH=$(PYTHONPATH) uvicorn clinical_trial_matching.api.main:app --reload --host 0.0.0.0 --port 8000
 
@@ -53,4 +64,4 @@ docker-down:
 	docker compose down
 
 clean:
-	rm -rf data/processed outputs .pytest_cache .mypy_cache .ruff_cache
+	rm -rf data/processed data/manifests outputs .pytest_cache .mypy_cache .ruff_cache

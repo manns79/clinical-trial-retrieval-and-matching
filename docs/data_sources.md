@@ -47,6 +47,8 @@ Normalized outputs should be generated under ignored paths:
 ```text
 data/processed/trec/<year>/topics.jsonl
 data/processed/trec/<year>/qrels.jsonl
+data/manifests/trec_<year>_topics.json
+data/manifests/trec_<year>_qrels.json
 outputs/trec_<year>_validation.json
 ```
 
@@ -69,6 +71,35 @@ The normalized qrels contract is JSONL with:
 - `year`
 
 Public repo rule: commit the parser, tests, docs, and small synthetic fixtures only. Do not commit downloaded TREC files, full ClinicalTrials.gov snapshots, generated indexes, or generated output reports unless they are deliberately small published benchmark summaries.
+
+### Source Manifests
+
+Source manifests record reproducibility metadata for files stored locally under ignored paths. They include:
+
+- manifest schema version
+- dataset/name/year
+- source URL
+- local path
+- SHA256 checksum
+- byte size
+- creation timestamp in UTC
+- parser/schema label
+- optional metadata
+
+Example:
+
+```bash
+ctmatch write-manifest \
+  --name trec_2021_topics \
+  --dataset trec_clinical_trials \
+  --year 2021 \
+  --parser trec_topics_xml \
+  --source-url https://trec.nist.gov/data/trials/topics2021.xml \
+  --input data/raw/trec/2021/topics2021.xml \
+  --output data/manifests/trec_2021_topics.json
+```
+
+For now, `data/manifests/` is ignored. Review generated manifests before deciding whether any small manifest files should become tracked project artifacts.
 
 ## Local Fixture Data
 

@@ -8,6 +8,10 @@ from clinical_trial_matching.ingestion.clinicaltrials import (
     trial_from_flat_record,
     trial_to_flat_record,
 )
+from clinical_trial_matching.ingestion.manifest import (
+    build_source_manifest,
+    manifest_to_json_record,
+)
 from clinical_trial_matching.ingestion.trec import (
     parse_qrels,
     parse_topics_xml,
@@ -58,6 +62,23 @@ def main() -> None:
     validate.add_argument("--qrels", type=Path, required=True)
     validate.add_argument("--output", type=Path)
 
+    manifest = subparsers.add_parser(
+        "write-manifest", help="Write a reproducibility manifest for a local source file."
+    )
+    manifest.add_argument("--name", required=True)
+    manifest.add_argument("--source-url", required=True)
+    manifest.add_argument("--input", type=Path, required=True)
+    manifest.add_argument("--output", type=Path, required=True)
+    manifest.add_argument("--dataset", default="")
+    manifest.add_argument("--year", type=int)
+    manifest.add_argument("--parser", default="")
+    manifest.add_argument(
+        "--metadata",
+        action="append",
+        default=[],
+        help="Optional key=value metadata. May be provided multiple times.",
+    )
+
     args = parser.parse_args()
 
     if args.command == "ingest-sample":
@@ -70,6 +91,17 @@ def main() -> None:
         ingest_trec_qrels(args.year, args.input, args.output)
     elif args.command == "validate-trec":
         validate_trec(args.topics, args.qrels, args.output)
+    elif args.command == "write-manifest":
+        write_manifest(
+            name=args.name,
+            source_url=args.source_url,
+            input_path=args.input,
+            output_path=args.output,
+            dataset=args.dataset,
+            year=args.year,
+            parser=args.parser,
+            metadata_items=args.metadata,
+        )
 
 
 def ingest_sample(trials_path: Path, output_path: Path) -> None:
@@ -128,6 +160,43 @@ def validate_trec(topics_path: Path, qrels_path: Path, output_path: Path | None)
     else:
         for key, value in summary.items():
             print(f"{key}: {value}")
+
+
+def write_manifest(
+    *,
+    name: str,
+    source_url: str,
+    input_path: Path,
+    output_path: Path,
+    dataset: str,
+    year: int | None,
+    parser: str,
+    metadata_items: list[str],
+) -> None:
+    manifest = build_source_manifest(
+        name=name,
+        source_url=source_url,
+        input_path=input_path,
+        dataset=dataset,
+        year=year,
+        parser=parser,
+        metadata=parse_metadata_items(metadata_items),
+    )
+    write_json(output_path, manifest_to_json_record(manifest))
+    print(f"Wrote source manifest to {output_path}")
+
+
+def parse_metadata_items(items: list[str]) -> dict[str, str]:
+    metadata: dict[str, str] = {}
+    for item in items:
+        if "=" not in item:
+            raise ValueError(f"Invalid metadata item {item!r}; expected key=value")
+        key, value = item.split("=", 1)
+        key = key.strip()
+        if not key:
+            raise ValueError(f"Invalid metadata item {item!r}; key cannot be empty")
+        metadata[key] = value.strip()
+    return metadata
 
 
 if __name__ == "__main__":

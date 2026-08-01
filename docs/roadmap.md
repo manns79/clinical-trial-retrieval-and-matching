@@ -14,6 +14,7 @@ Current TREC ingestion status:
 - 2023-style fielded topic XML parsing is scaffolded.
 - TREC qrels normalization and validation are scaffolded.
 - Real benchmark files are expected under ignored local `data/raw/` paths.
+- Source manifest/checksum writing is scaffolded under ignored local `data/manifests/` paths.
 
 ## Milestone 2: Structured Retrieval
 
