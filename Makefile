@@ -1,7 +1,7 @@
 PYTHON ?= python3
 PYTHONPATH ?= src
 
-.PHONY: install install-dev test compile ingest-sample evaluate-baseline ingest-trec-sample validate-trec-sample write-manifest-sample api docker-up docker-down clean
+.PHONY: install install-dev test compile ingest-sample ingest-ctgov-sample evaluate-baseline ingest-trec-sample validate-trec-sample write-manifest-sample api docker-up docker-down clean
 
 install:
 	$(PYTHON) -m pip install -e .
@@ -19,6 +19,11 @@ ingest-sample:
 	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m clinical_trial_matching.cli ingest-sample \
 		--trials data/fixtures/trials.sample.jsonl \
 		--output data/processed/sample_trials.jsonl
+
+ingest-ctgov-sample:
+	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m clinical_trial_matching.cli ingest-ctgov-studies \
+		--input data/fixtures/ctgov_v2_studies.sample.json \
+		--output data/processed/clinicaltrials/studies.sample.jsonl
 
 evaluate-baseline:
 	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m clinical_trial_matching.cli evaluate-baseline \

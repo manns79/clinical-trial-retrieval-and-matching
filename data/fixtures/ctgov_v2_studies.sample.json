@@ -1,0 +1,79 @@
+{
+  "studies": [
+    {
+      "protocolSection": {
+        "identificationModule": {
+          "nctId": "NCT99991001",
+          "briefTitle": "Synthetic Asthma Controller Therapy Study",
+          "officialTitle": "A Synthetic Study of Controller Therapy for Adults With Persistent Asthma"
+        },
+        "statusModule": {
+          "overallStatus": "RECRUITING"
+        },
+        "conditionsModule": {
+          "conditions": [
+            "Asthma"
+          ]
+        },
+        "designModule": {
+          "studyType": "INTERVENTIONAL",
+          "phases": [
+            "PHASE2"
+          ]
+        },
+        "armsInterventionsModule": {
+          "interventions": [
+            {
+              "type": "DRUG",
+              "name": "Inhaled corticosteroid"
+            },
+            {
+              "type": "OTHER",
+              "name": "Asthma education"
+            }
+          ]
+        },
+        "eligibilityModule": {
+          "eligibilityCriteria": "Inclusion Criteria:\n\nAdults with persistent asthma and documented wheezing.\n\nExclusion Criteria:\n\nCurrent tobacco use or recent respiratory infection.",
+          "sex": "ALL",
+          "minimumAge": "18 Years",
+          "maximumAge": "65 Years"
+        },
+        "contactsLocationsModule": {
+          "locations": [
+            {
+              "facility": "Synthetic Medical Center",
+              "city": "Boston",
+              "state": "Massachusetts",
+              "country": "United States"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "protocolSection": {
+        "identificationModule": {
+          "nctId": "NCT99991002",
+          "briefTitle": "Synthetic Diabetes Lifestyle Study"
+        },
+        "statusModule": {
+          "overallStatus": "COMPLETED"
+        },
+        "conditionsModule": {
+          "conditions": [
+            "Type 2 Diabetes"
+          ]
+        },
+        "designModule": {
+          "studyType": "OBSERVATIONAL"
+        },
+        "eligibilityModule": {
+          "eligibilityCriteria": "Adults with type 2 diabetes and elevated HbA1c.",
+          "sex": "ALL",
+          "minimumAge": "21 Years"
+        }
+      }
+    }
+  ]
+}

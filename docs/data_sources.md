@@ -13,6 +13,46 @@ ClinicalTrials.gov provides a modern public API under `/api/v2/` and full study 
 
 The benchmark pipeline should use frozen snapshots so retrieval metrics remain reproducible.
 
+Recommended local layout:
+
+```text
+data/raw/clinicaltrials/studies.sample.json
+data/raw/clinicaltrials/studies.json
+data/raw/clinicaltrials/studies.json.zip
+data/processed/clinicaltrials/studies.jsonl
+data/manifests/clinicaltrials_<snapshot>_studies.json
+```
+
+The initial parser supports ClinicalTrials.gov v2 JSON records shaped like:
+
+```text
+protocolSection.identificationModule
+protocolSection.statusModule
+protocolSection.conditionsModule
+protocolSection.designModule
+protocolSection.armsInterventionsModule
+protocolSection.eligibilityModule
+protocolSection.contactsLocationsModule
+```
+
+The normalized trial contract currently includes:
+
+- `nct_id`
+- `title`
+- `status`
+- `conditions`
+- `interventions`
+- `eligibility_criteria`
+- `sex`
+- `minimum_age`
+- `maximum_age`
+- `phases`
+- `study_type`
+- `locations`
+- `source`
+
+Public repo rule: commit parser code, tests, docs, and tiny synthetic fixtures only. Do not commit full API responses, downloaded JSON archives, normalized corpora, generated indexes, or local manifests without reviewing them first.
+
 ## TREC Clinical Trials
 
 The TREC Clinical Trials tracks provide patient topics and relevance judgments:

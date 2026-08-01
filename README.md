@@ -18,6 +18,7 @@ This project is a research and engineering demo. It is not a medical device, doe
 make compile
 make test
 make ingest-sample
+make ingest-ctgov-sample
 make evaluate-baseline
 make ingest-trec-sample
 make validate-trec-sample
@@ -66,6 +67,24 @@ ctmatch write-manifest \
   --input data/raw/trec/2021/qrels2021.txt \
   --output data/manifests/trec_2021_qrels.json
 ```
+
+## ClinicalTrials.gov Ingestion
+
+ClinicalTrials.gov v2 records should be stored under ignored local paths such as `data/raw/clinicaltrials/`. Do not commit full API responses, full JSON downloads, normalized trial corpora, or vector indexes.
+
+Example command for a small local v2 API response:
+
+```bash
+ctmatch ingest-ctgov-studies \
+  --input data/raw/clinicaltrials/studies.sample.json \
+  --output data/processed/clinicaltrials/studies.jsonl
+```
+
+The parser currently supports:
+
+- a single v2 study record with `protocolSection`
+- a JSON array of study records
+- a v2 API response object with a top-level `studies` list
 
 To run the API after installing dependencies:
 

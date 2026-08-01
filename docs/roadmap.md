@@ -15,6 +15,7 @@ Current TREC ingestion status:
 - TREC qrels normalization and validation are scaffolded.
 - Real benchmark files are expected under ignored local `data/raw/` paths.
 - Source manifest/checksum writing is scaffolded under ignored local `data/manifests/` paths.
+- ClinicalTrials.gov v2 JSON study parsing is scaffolded for small API responses and fixtures.
 
 ## Milestone 2: Structured Retrieval
 

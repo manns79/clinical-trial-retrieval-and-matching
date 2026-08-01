@@ -5,6 +5,7 @@ from pathlib import Path
 
 from clinical_trial_matching.evaluation.metrics import summarize_run
 from clinical_trial_matching.ingestion.clinicaltrials import (
+    parse_studies_json,
     trial_from_flat_record,
     trial_to_flat_record,
 )
@@ -33,6 +34,12 @@ def main() -> None:
     ingest = subparsers.add_parser("ingest-sample", help="Normalize synthetic fixture trials.")
     ingest.add_argument("--trials", type=Path, required=True)
     ingest.add_argument("--output", type=Path, required=True)
+
+    ctgov = subparsers.add_parser(
+        "ingest-ctgov-studies", help="Normalize ClinicalTrials.gov v2 JSON studies to JSONL."
+    )
+    ctgov.add_argument("--input", type=Path, required=True)
+    ctgov.add_argument("--output", type=Path, required=True)
 
     evaluate = subparsers.add_parser("evaluate-baseline", help="Evaluate BM25 on fixture data.")
     evaluate.add_argument("--trials", type=Path, required=True)
@@ -83,6 +90,8 @@ def main() -> None:
 
     if args.command == "ingest-sample":
         ingest_sample(args.trials, args.output)
+    elif args.command == "ingest-ctgov-studies":
+        ingest_ctgov_studies(args.input, args.output)
     elif args.command == "evaluate-baseline":
         evaluate_baseline(args.trials, args.topics, args.qrels, args.output, args.top_k)
     elif args.command == "ingest-trec-topics":
@@ -108,6 +117,12 @@ def ingest_sample(trials_path: Path, output_path: Path) -> None:
     trials = [trial_from_flat_record(row) for row in read_jsonl(trials_path)]
     write_jsonl(output_path, (trial_to_flat_record(trial) for trial in trials))
     print(f"Wrote {len(trials)} normalized trials to {output_path}")
+
+
+def ingest_ctgov_studies(input_path: Path, output_path: Path) -> None:
+    trials = parse_studies_json(input_path)
+    write_jsonl(output_path, (trial_to_flat_record(trial) for trial in trials))
+    print(f"Wrote {len(trials)} normalized ClinicalTrials.gov studies to {output_path}")
 
 
 def evaluate_baseline(

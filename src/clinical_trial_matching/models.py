@@ -11,6 +11,11 @@ class Trial:
     conditions: tuple[str, ...] = ()
     interventions: tuple[str, ...] = ()
     eligibility_criteria: str = ""
+    sex: str = ""
+    minimum_age: str = ""
+    maximum_age: str = ""
+    phases: tuple[str, ...] = ()
+    study_type: str = ""
     locations: tuple[str, ...] = ()
     source: dict[str, str] = field(default_factory=dict)
 
@@ -22,6 +27,11 @@ class Trial:
             " ".join(self.conditions),
             " ".join(self.interventions),
             self.eligibility_criteria,
+            self.sex,
+            self.minimum_age,
+            self.maximum_age,
+            " ".join(self.phases),
+            self.study_type,
             " ".join(self.locations),
         ]
         return " ".join(part for part in parts if part)
