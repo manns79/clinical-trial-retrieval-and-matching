@@ -28,9 +28,32 @@ class Trial:
 
 
 @dataclass(frozen=True)
+class TopicField:
+    name: str
+    value: str
+
+
+@dataclass(frozen=True)
 class Topic:
     topic_id: str
     text: str
+    year: int | None = None
+    fields: tuple[TopicField, ...] = ()
+    template: str = ""
+    source: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class Qrel:
+    topic_id: str
+    nct_id: str
+    relevance: int
+    year: int | None = None
+
+    @property
+    def label(self) -> str:
+        labels = {0: "irrelevant", 1: "excluded", 2: "eligible"}
+        return labels.get(self.relevance, "unknown")
 
 
 @dataclass(frozen=True)

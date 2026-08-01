@@ -8,6 +8,13 @@
 - Produce BM25 run files and metrics.
 - Add CI regression tests on synthetic fixtures.
 
+Current TREC ingestion status:
+
+- 2021/2022-style free-text topic XML parsing is scaffolded.
+- 2023-style fielded topic XML parsing is scaffolded.
+- TREC qrels normalization and validation are scaffolded.
+- Real benchmark files are expected under ignored local `data/raw/` paths.
+
 ## Milestone 2: Structured Retrieval
 
 - Add age, sex, recruitment status, and location normalization.

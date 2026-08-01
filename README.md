@@ -19,9 +19,34 @@ make compile
 make test
 make ingest-sample
 make evaluate-baseline
+make ingest-trec-sample
+make validate-trec-sample
 ```
 
 The initial sample commands use synthetic fixture data so they can run without downloading large benchmark corpora.
+
+## TREC Ingestion
+
+Real TREC inputs should live under ignored local paths such as `data/raw/trec/2021/`. Do not commit downloaded benchmark corpora, normalized benchmark outputs, or evaluation artifacts.
+
+Example commands once you have downloaded the official files locally:
+
+```bash
+ctmatch ingest-trec-topics \
+  --year 2021 \
+  --input data/raw/trec/2021/topics2021.xml \
+  --output data/processed/trec/2021/topics.jsonl
+
+ctmatch ingest-trec-qrels \
+  --year 2021 \
+  --input data/raw/trec/2021/qrels2021.txt \
+  --output data/processed/trec/2021/qrels.jsonl
+
+ctmatch validate-trec \
+  --topics data/processed/trec/2021/topics.jsonl \
+  --qrels data/processed/trec/2021/qrels.jsonl \
+  --output outputs/trec_2021_validation.json
+```
 
 To run the API after installing dependencies:
 

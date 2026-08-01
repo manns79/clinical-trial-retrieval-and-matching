@@ -22,3 +22,8 @@ jobs:
         run: |
           python -m clinical_trial_matching.cli ingest-sample --trials data/fixtures/trials.sample.jsonl --output data/processed/sample_trials.jsonl
           python -m clinical_trial_matching.cli evaluate-baseline --trials data/fixtures/trials.sample.jsonl --topics data/fixtures/topics.sample.jsonl --qrels data/fixtures/qrels.sample.tsv --output outputs/sample_bm25_metrics.json
+      - name: Sample TREC ingestion
+        run: |
+          python -m clinical_trial_matching.cli ingest-trec-topics --year 2021 --input data/fixtures/topics2021.sample.xml --output data/processed/trec/2021/topics.jsonl
+          python -m clinical_trial_matching.cli ingest-trec-qrels --year 2021 --input data/fixtures/qrels2021.sample.txt --output data/processed/trec/2021/qrels.jsonl
+          python -m clinical_trial_matching.cli validate-trec --topics data/processed/trec/2021/topics.jsonl --qrels data/processed/trec/2021/qrels.jsonl --output outputs/sample_trec_validation.json

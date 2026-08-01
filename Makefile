@@ -1,7 +1,7 @@
 PYTHON ?= python3
 PYTHONPATH ?= src
 
-.PHONY: install install-dev test compile ingest-sample evaluate-baseline api docker-up docker-down clean
+.PHONY: install install-dev test compile ingest-sample evaluate-baseline ingest-trec-sample validate-trec-sample api docker-up docker-down clean
 
 install:
 	$(PYTHON) -m pip install -e .
@@ -26,6 +26,22 @@ evaluate-baseline:
 		--topics data/fixtures/topics.sample.jsonl \
 		--qrels data/fixtures/qrels.sample.tsv \
 		--output outputs/sample_bm25_metrics.json
+
+ingest-trec-sample:
+	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m clinical_trial_matching.cli ingest-trec-topics \
+		--year 2021 \
+		--input data/fixtures/topics2021.sample.xml \
+		--output data/processed/trec/2021/topics.jsonl
+	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m clinical_trial_matching.cli ingest-trec-qrels \
+		--year 2021 \
+		--input data/fixtures/qrels2021.sample.txt \
+		--output data/processed/trec/2021/qrels.jsonl
+
+validate-trec-sample:
+	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m clinical_trial_matching.cli validate-trec \
+		--topics data/processed/trec/2021/topics.jsonl \
+		--qrels data/processed/trec/2021/qrels.jsonl \
+		--output outputs/sample_trec_validation.json
 
 api:
 	PYTHONPATH=$(PYTHONPATH) uvicorn clinical_trial_matching.api.main:app --reload --host 0.0.0.0 --port 8000

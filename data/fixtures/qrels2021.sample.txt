@@ -1,0 +1,5 @@
+# topic_id Q0 nct_id relevance
+1 0 NCT99990001 2
+1 0 NCT99990002 0
+2 0 NCT99990002 2
+2 0 NCT99990003 0

@@ -1,0 +1,9 @@
+<topics task="2023 TREC Clinical Trials">
+  <topic number="101" template="glaucoma">
+    <field name="diagnosis">Primary open-angle glaucoma</field>
+    <field name="intraocular pressure">19 mmHg</field>
+    <field name="visual acuity">20/80</field>
+    <field name="prior cataract surgery">no</field>
+    <field name="comorbid ocular diseases"></field>
+  </topic>
+</topics>
