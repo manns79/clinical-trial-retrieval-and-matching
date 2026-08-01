@@ -1,0 +1,14 @@
+[app]
+environment = "local"
+data_dir = "data"
+log_level = "INFO"
+
+[retrieval]
+default_top_k = 10
+bm25_k1 = 1.5
+bm25_b = 0.75
+
+[evaluation]
+eligible_gain = 2
+excluded_gain = 1
+irrelevant_gain = 0
