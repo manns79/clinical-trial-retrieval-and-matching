@@ -1,5 +1,4 @@
 .venv/
-.repo-git/
 __pycache__/
 *.py[cod]
 .pytest_cache/
