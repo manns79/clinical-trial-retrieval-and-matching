@@ -23,6 +23,7 @@ Current TREC ingestion status:
 - FastAPI `/trial/{nct_id}` returns full normalized trial details from the configured corpus.
 - Streamlit UI is scaffolded as a thin client over `/search` and `/trial/{nct_id}`.
 - Docker Compose runs API, Streamlit UI, and Postgres/pgvector with one command for the local demo.
+- GitHub Actions includes a Docker build and API smoke check.
 
 ## Milestone 2: Structured Retrieval
 

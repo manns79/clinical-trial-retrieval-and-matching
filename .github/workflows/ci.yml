@@ -33,3 +33,12 @@ jobs:
       - name: Sample source manifest
         run: |
           python -m clinical_trial_matching.cli write-manifest --name sample_trec_2021_topics --dataset trec_clinical_trials --year 2021 --parser trec_topics_xml --source-url https://trec.nist.gov/data/trials/topics2021.xml --input data/fixtures/topics2021.sample.xml --output data/manifests/sample_trec_2021_topics.json --metadata fixture=synthetic
+
+  docker-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Docker Compose config
+        run: docker compose config
+      - name: Docker build and API smoke check
+        run: sh scripts/docker_smoke_check.sh

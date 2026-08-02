@@ -1,7 +1,7 @@
 PYTHON ?= python3
 PYTHONPATH ?= src
 
-.PHONY: install install-dev install-ui test compile ingest-sample ingest-ctgov-sample report-ctgov-sample search-ctgov-sample download-ctgov-small evaluate-baseline ingest-trec-sample validate-trec-sample write-manifest-sample api ui docker-up docker-down clean
+.PHONY: install install-dev install-ui test compile ingest-sample ingest-ctgov-sample report-ctgov-sample search-ctgov-sample download-ctgov-small evaluate-baseline ingest-trec-sample validate-trec-sample write-manifest-sample api ui docker-up docker-down docker-smoke clean
 
 install:
 	$(PYTHON) -m pip install -e .
@@ -94,6 +94,9 @@ docker-up:
 
 docker-down:
 	docker compose down
+
+docker-smoke:
+	sh scripts/docker_smoke_check.sh
 
 clean:
 	rm -rf data/processed data/manifests outputs .pytest_cache .mypy_cache .ruff_cache

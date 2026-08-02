@@ -193,6 +193,14 @@ Compose starts:
 
 The API service seeds the small synthetic ClinicalTrials.gov fixture into `data/processed/clinicaltrials/studies.sample.jsonl` before starting. Generated data remains ignored by git.
 
+Run the Docker image smoke check:
+
+```bash
+make docker-smoke
+```
+
+The smoke check builds the image, starts the API with the synthetic fixture mounted, and verifies `/health`, `/search`, and `/trial/NCT99991001`.
+
 ## Repository Layout
 
 ```text

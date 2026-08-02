@@ -38,6 +38,8 @@ The Streamlit UI is a thin client over FastAPI. It reads `API_BASE_URL`, default
 
 Docker Compose runs FastAPI, Streamlit, and Postgres/pgvector. The API service seeds the small synthetic ClinicalTrials.gov fixture into the mounted `data/processed/` directory before starting so a fresh local demo has a searchable corpus. The UI service uses `API_BASE_URL=http://api:8000` inside the Compose network.
 
+CI runs a Docker smoke check that builds the image, starts the API container with fixture data mounted, and verifies `/health`, `/search`, and `/trial/NCT99991001`.
+
 ## Guardrails
 
 - Always distinguish benchmark snapshots from live ClinicalTrials.gov data.
