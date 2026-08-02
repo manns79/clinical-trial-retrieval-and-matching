@@ -1,10 +1,23 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from clinical_trial_matching.io import read_json
 from clinical_trial_matching.models import Trial
+
+CTGOV_API_BASE_URL = "https://clinicaltrials.gov/api/v2"
+CTGOV_STUDIES_ENDPOINT = "/studies"
+
+
+@dataclass(frozen=True)
+class CtgovDownloadResult:
+    payload: dict[str, Any]
+    request_url: str
+    study_count: int
+    total_count: int | None
+    next_page_token: str
 
 
 def _as_tuple(value: Any) -> tuple[str, ...]:
@@ -56,6 +69,64 @@ def trial_to_flat_record(trial: Trial) -> dict[str, Any]:
 def parse_studies_json(path: Path) -> list[Trial]:
     payload = read_json(path)
     return trials_from_v2_payload(payload, source_path=path)
+
+
+def fetch_ctgov_studies(
+    *,
+    query: str,
+    status: str | None = None,
+    page_size: int = 25,
+    base_url: str = CTGOV_API_BASE_URL,
+    timeout_seconds: float = 30.0,
+    client: Any = None,
+) -> CtgovDownloadResult:
+    if not query.strip():
+        raise ValueError("ClinicalTrials.gov query cannot be empty")
+    if page_size < 1 or page_size > 1000:
+        raise ValueError("ClinicalTrials.gov page size must be between 1 and 1000")
+
+    params: dict[str, str | int] = {
+        "format": "json",
+        "query.term": query,
+        "pageSize": page_size,
+        "countTotal": "true",
+    }
+    if status:
+        params["filter.overallStatus"] = status
+
+    close_client = client is None
+    if client is None:
+        try:
+            import httpx
+        except ImportError as exc:
+            raise RuntimeError(
+                "Install project dependencies with `python3 -m pip install -e .` before live downloads."
+            ) from exc
+        http_client = httpx.Client(timeout=timeout_seconds)
+    else:
+        http_client = client
+    try:
+        response = http_client.get(f"{base_url.rstrip('/')}{CTGOV_STUDIES_ENDPOINT}", params=params)
+        response.raise_for_status()
+        payload = response.json()
+    finally:
+        if close_client:
+            http_client.close()
+
+    if not isinstance(payload, dict):
+        raise ValueError("ClinicalTrials.gov response was not a JSON object")
+    studies = payload.get("studies", [])
+    if not isinstance(studies, list):
+        raise ValueError("ClinicalTrials.gov response field 'studies' was not a list")
+
+    total_count = payload.get("totalCount")
+    return CtgovDownloadResult(
+        payload=payload,
+        request_url=str(response.url),
+        study_count=len(studies),
+        total_count=int(total_count) if isinstance(total_count, int | float | str) else None,
+        next_page_token=str(payload.get("nextPageToken", "")),
+    )
 
 
 def trials_from_v2_payload(payload: Any, source_path: Path | None = None) -> list[Trial]:

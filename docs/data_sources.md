@@ -13,6 +13,15 @@ ClinicalTrials.gov provides a modern public API under `/api/v2/` and full study 
 
 The benchmark pipeline should use frozen snapshots so retrieval metrics remain reproducible.
 
+The small live-query workflow uses:
+
+- Endpoint: `https://clinicaltrials.gov/api/v2/studies`
+- General search parameter: `query.term`
+- Recruitment status filter: `filter.overallStatus`
+- Page size parameter: `pageSize`
+- JSON format parameter: `format=json`
+- Total-count flag: `countTotal=true`
+
 Recommended local layout:
 
 ```text
@@ -52,6 +61,18 @@ The normalized trial contract currently includes:
 - `source`
 
 Public repo rule: commit parser code, tests, docs, and tiny synthetic fixtures only. Do not commit full API responses, downloaded JSON archives, normalized corpora, generated indexes, or local manifests without reviewing them first.
+
+Example live query:
+
+```bash
+ctmatch download-ctgov-studies \
+  --query asthma \
+  --status RECRUITING \
+  --page-size 25 \
+  --raw-output data/raw/clinicaltrials/asthma_recruiting_25.json \
+  --manifest-output data/manifests/clinicaltrials_asthma_recruiting_25.json \
+  --processed-output data/processed/clinicaltrials/asthma_recruiting_25.jsonl
+```
 
 ## TREC Clinical Trials
 

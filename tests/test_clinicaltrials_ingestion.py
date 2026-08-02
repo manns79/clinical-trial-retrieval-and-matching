@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
+from clinical_trial_matching.cli import download_ctgov_studies
 from clinical_trial_matching.ingestion.clinicaltrials import (
+    CtgovDownloadResult,
+    fetch_ctgov_studies,
     parse_studies_json,
     trial_from_ctgov_v2_record,
     trial_from_flat_record,
@@ -74,6 +79,99 @@ class ClinicalTrialsIngestionTest(unittest.TestCase):
         self.assertIn("Inhaled corticosteroid", trial.searchable_text)
         self.assertIn("18 Years", trial.searchable_text)
         self.assertIn("PHASE2", trial.searchable_text)
+
+    def test_fetch_ctgov_studies_uses_query_and_status_parameters(self) -> None:
+        class FakeResponse:
+            url = "https://clinicaltrials.gov/api/v2/studies?query.term=asthma"
+
+            def raise_for_status(self) -> None:
+                return None
+
+            def json(self) -> dict[str, object]:
+                return {
+                    "studies": [
+                        {
+                            "protocolSection": {
+                                "identificationModule": {"nctId": "NCT99991004"}
+                            }
+                        }
+                    ],
+                    "totalCount": 123,
+                    "nextPageToken": "next-token",
+                }
+
+        class FakeClient:
+            def __init__(self) -> None:
+                self.params: dict[str, str | int] = {}
+
+            def get(self, url: str, params: dict[str, str | int]) -> FakeResponse:
+                assert url == "https://clinicaltrials.gov/api/v2/studies"
+                self.params = params
+                return FakeResponse()
+
+        client = FakeClient()
+        result = fetch_ctgov_studies(query="asthma", status="RECRUITING", page_size=25, client=client)
+
+        self.assertEqual(client.params["query.term"], "asthma")
+        self.assertEqual(client.params["filter.overallStatus"], "RECRUITING")
+        self.assertEqual(client.params["pageSize"], 25)
+        self.assertEqual(client.params["countTotal"], "true")
+        self.assertEqual(result.study_count, 1)
+        self.assertEqual(result.total_count, 123)
+        self.assertEqual(result.next_page_token, "next-token")
+        self.assertIn("query.term=asthma", result.request_url)
+
+    def test_fetch_ctgov_studies_rejects_large_page_size(self) -> None:
+        with self.assertRaisesRegex(ValueError, "between 1 and 1000"):
+            fetch_ctgov_studies(query="asthma", page_size=1001)
+
+    def test_download_ctgov_studies_writes_raw_processed_and_manifest(self) -> None:
+        payload = {
+            "studies": [
+                {
+                    "protocolSection": {
+                        "identificationModule": {
+                            "nctId": "NCT99991005",
+                            "briefTitle": "Synthetic Live Asthma Study",
+                        },
+                        "conditionsModule": {"conditions": ["Asthma"]},
+                    }
+                }
+            ],
+            "totalCount": 1,
+        }
+        result = CtgovDownloadResult(
+            payload=payload,
+            request_url="https://clinicaltrials.gov/api/v2/studies?query.term=asthma",
+            study_count=1,
+            total_count=1,
+            next_page_token="",
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            raw_output = Path(tmpdir) / "raw.json"
+            processed_output = Path(tmpdir) / "processed.jsonl"
+            manifest_output = Path(tmpdir) / "manifest.json"
+            with patch("clinical_trial_matching.cli.fetch_ctgov_studies", return_value=result):
+                download_ctgov_studies(
+                    query="asthma",
+                    status="RECRUITING",
+                    page_size=25,
+                    raw_output=raw_output,
+                    manifest_output=manifest_output,
+                    processed_output=processed_output,
+                    base_url="https://clinicaltrials.gov/api/v2",
+                    timeout_seconds=30.0,
+                )
+
+            parsed = parse_studies_json(raw_output)
+            processed_rows = read_jsonl(processed_output)
+            manifest = json.loads(manifest_output.read_text(encoding="utf-8"))
+
+        self.assertEqual(parsed[0].nct_id, "NCT99991005")
+        self.assertEqual(processed_rows[0]["nct_id"], "NCT99991005")
+        self.assertEqual(manifest["metadata"]["query"], "asthma")
+        self.assertEqual(manifest["metadata"]["study_count"], "1")
 
 
 if __name__ == "__main__":

@@ -16,6 +16,7 @@ Current TREC ingestion status:
 - Real benchmark files are expected under ignored local `data/raw/` paths.
 - Source manifest/checksum writing is scaffolded under ignored local `data/manifests/` paths.
 - ClinicalTrials.gov v2 JSON study parsing is scaffolded for small API responses and fixtures.
+- Small live ClinicalTrials.gov query downloads are scaffolded with raw JSON, manifest, and normalized JSONL outputs.
 
 ## Milestone 2: Structured Retrieval
 

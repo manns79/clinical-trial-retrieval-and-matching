@@ -72,6 +72,24 @@ ctmatch write-manifest \
 
 ClinicalTrials.gov v2 records should be stored under ignored local paths such as `data/raw/clinicaltrials/`. Do not commit full API responses, full JSON downloads, normalized trial corpora, or vector indexes.
 
+Example command for a small live API query:
+
+```bash
+ctmatch download-ctgov-studies \
+  --query asthma \
+  --status RECRUITING \
+  --page-size 25 \
+  --raw-output data/raw/clinicaltrials/asthma_recruiting_25.json \
+  --manifest-output data/manifests/clinicaltrials_asthma_recruiting_25.json \
+  --processed-output data/processed/clinicaltrials/asthma_recruiting_25.jsonl
+```
+
+This command writes the raw API response, a source manifest with request/checksum metadata, and normalized trial JSONL. The equivalent Make target is:
+
+```bash
+make download-ctgov-small
+```
+
 Example command for a small local v2 API response:
 
 ```bash

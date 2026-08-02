@@ -5,6 +5,8 @@ from pathlib import Path
 
 from clinical_trial_matching.evaluation.metrics import summarize_run
 from clinical_trial_matching.ingestion.clinicaltrials import (
+    CTGOV_API_BASE_URL,
+    fetch_ctgov_studies,
     parse_studies_json,
     trial_from_flat_record,
     trial_to_flat_record,
@@ -40,6 +42,19 @@ def main() -> None:
     )
     ctgov.add_argument("--input", type=Path, required=True)
     ctgov.add_argument("--output", type=Path, required=True)
+
+    ctgov_live = subparsers.add_parser(
+        "download-ctgov-studies",
+        help="Fetch a small ClinicalTrials.gov v2 query, write raw JSON, manifest, and JSONL.",
+    )
+    ctgov_live.add_argument("--query", required=True)
+    ctgov_live.add_argument("--status", default="RECRUITING")
+    ctgov_live.add_argument("--page-size", type=int, default=25)
+    ctgov_live.add_argument("--raw-output", type=Path, required=True)
+    ctgov_live.add_argument("--manifest-output", type=Path, required=True)
+    ctgov_live.add_argument("--processed-output", type=Path, required=True)
+    ctgov_live.add_argument("--base-url", default=CTGOV_API_BASE_URL)
+    ctgov_live.add_argument("--timeout-seconds", type=float, default=30.0)
 
     evaluate = subparsers.add_parser("evaluate-baseline", help="Evaluate BM25 on fixture data.")
     evaluate.add_argument("--trials", type=Path, required=True)
@@ -92,6 +107,17 @@ def main() -> None:
         ingest_sample(args.trials, args.output)
     elif args.command == "ingest-ctgov-studies":
         ingest_ctgov_studies(args.input, args.output)
+    elif args.command == "download-ctgov-studies":
+        download_ctgov_studies(
+            query=args.query,
+            status=args.status,
+            page_size=args.page_size,
+            raw_output=args.raw_output,
+            manifest_output=args.manifest_output,
+            processed_output=args.processed_output,
+            base_url=args.base_url,
+            timeout_seconds=args.timeout_seconds,
+        )
     elif args.command == "evaluate-baseline":
         evaluate_baseline(args.trials, args.topics, args.qrels, args.output, args.top_k)
     elif args.command == "ingest-trec-topics":
@@ -123,6 +149,51 @@ def ingest_ctgov_studies(input_path: Path, output_path: Path) -> None:
     trials = parse_studies_json(input_path)
     write_jsonl(output_path, (trial_to_flat_record(trial) for trial in trials))
     print(f"Wrote {len(trials)} normalized ClinicalTrials.gov studies to {output_path}")
+
+
+def download_ctgov_studies(
+    *,
+    query: str,
+    status: str,
+    page_size: int,
+    raw_output: Path,
+    manifest_output: Path,
+    processed_output: Path,
+    base_url: str,
+    timeout_seconds: float,
+) -> None:
+    result = fetch_ctgov_studies(
+        query=query,
+        status=status,
+        page_size=page_size,
+        base_url=base_url,
+        timeout_seconds=timeout_seconds,
+    )
+    write_json(raw_output, result.payload)
+
+    trials = parse_studies_json(raw_output)
+    write_jsonl(processed_output, (trial_to_flat_record(trial) for trial in trials))
+
+    manifest = build_source_manifest(
+        name=f"clinicaltrials_gov_{slugify(query)}_{slugify(status)}_{page_size}",
+        source_url=result.request_url,
+        input_path=raw_output,
+        dataset="clinicaltrials_gov",
+        parser="clinicaltrials_gov_v2_studies",
+        metadata={
+            "query": query,
+            "status": status,
+            "page_size": str(page_size),
+            "study_count": str(result.study_count),
+            "total_count": str(result.total_count) if result.total_count is not None else "",
+            "next_page_token": result.next_page_token,
+        },
+    )
+    write_json(manifest_output, manifest_to_json_record(manifest))
+
+    print(f"Wrote raw ClinicalTrials.gov response to {raw_output}")
+    print(f"Wrote {len(trials)} normalized ClinicalTrials.gov studies to {processed_output}")
+    print(f"Wrote source manifest to {manifest_output}")
 
 
 def evaluate_baseline(
@@ -212,6 +283,11 @@ def parse_metadata_items(items: list[str]) -> dict[str, str]:
             raise ValueError(f"Invalid metadata item {item!r}; key cannot be empty")
         metadata[key] = value.strip()
     return metadata
+
+
+def slugify(value: str) -> str:
+    slug = "".join(character.lower() if character.isalnum() else "_" for character in value)
+    return "_".join(part for part in slug.split("_") if part) or "all"
 
 
 if __name__ == "__main__":
