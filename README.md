@@ -20,6 +20,7 @@ make test
 make ingest-sample
 make ingest-ctgov-sample
 make report-ctgov-sample
+make search-ctgov-sample
 make evaluate-baseline
 make ingest-trec-sample
 make validate-trec-sample
@@ -97,6 +98,16 @@ After normalizing a trial corpus, generate a lightweight validation report:
 ctmatch report-trial-corpus \
   --trials data/processed/clinicaltrials/asthma_recruiting_25.jsonl \
   --output outputs/clinicaltrials_asthma_recruiting_25_report.json
+```
+
+Search a normalized trial corpus with BM25:
+
+```bash
+ctmatch search-trials-bm25 \
+  --trials data/processed/clinicaltrials/asthma_recruiting_25.jsonl \
+  --query "adult persistent asthma inhaled corticosteroid" \
+  --top-k 10 \
+  --output outputs/clinicaltrials_asthma_recruiting_25_search.json
 ```
 
 Example command for a small local v2 API response:

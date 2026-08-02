@@ -26,7 +26,7 @@ from clinical_trial_matching.ingestion.trec import (
     validate_topics_and_qrels,
 )
 from clinical_trial_matching.io import read_jsonl, write_json, write_jsonl
-from clinical_trial_matching.retrieval.bm25 import BM25Retriever
+from clinical_trial_matching.retrieval.bm25 import BM25Retriever, search_trials
 from clinical_trial_matching.validation.trials import summarize_trial_corpus
 
 
@@ -71,6 +71,15 @@ def main() -> None:
     trial_report.add_argument("--output", type=Path)
     trial_report.add_argument("--sample-size", type=int, default=5)
     trial_report.add_argument("--top-n", type=int, default=10)
+
+    trial_search = subparsers.add_parser(
+        "search-trials-bm25", help="Search a normalized trial JSONL corpus with BM25."
+    )
+    trial_search.add_argument("--trials", type=Path, required=True)
+    trial_search.add_argument("--query", required=True)
+    trial_search.add_argument("--output", type=Path)
+    trial_search.add_argument("--top-k", type=int, default=10)
+    trial_search.add_argument("--snippet-chars", type=int, default=240)
 
     trec_topics = subparsers.add_parser(
         "ingest-trec-topics", help="Normalize TREC Clinical Trials topics XML to JSONL."
@@ -131,6 +140,14 @@ def main() -> None:
         evaluate_baseline(args.trials, args.topics, args.qrels, args.output, args.top_k)
     elif args.command == "report-trial-corpus":
         report_trial_corpus(args.trials, args.output, args.sample_size, args.top_n)
+    elif args.command == "search-trials-bm25":
+        search_trials_bm25(
+            args.trials,
+            args.query,
+            args.output,
+            args.top_k,
+            args.snippet_chars,
+        )
     elif args.command == "ingest-trec-topics":
         ingest_trec_topics(args.year, args.input, args.output)
     elif args.command == "ingest-trec-qrels":
@@ -247,6 +264,37 @@ def report_trial_corpus(
     else:
         for key, value in report.items():
             print(f"{key}: {value}")
+
+
+def search_trials_bm25(
+    trials_path: Path,
+    query: str,
+    output_path: Path | None,
+    top_k: int,
+    snippet_chars: int,
+) -> None:
+    if top_k < 1:
+        raise ValueError("Top-K must be at least 1")
+    if snippet_chars < 1:
+        raise ValueError("Snippet chars must be at least 1")
+    trials = [trial_from_flat_record(row) for row in read_jsonl(trials_path)]
+    payload = search_trials(
+        trials,
+        query=query,
+        top_k=top_k,
+        snippet_chars=snippet_chars,
+    )
+    if output_path:
+        write_json(output_path, payload)
+        print(f"Wrote BM25 search results to {output_path}")
+    else:
+        for result in payload["results"]:
+            print(
+                f"{result['rank']}. {result['nct_id']} "
+                f"score={result['score']} status={result['status']} title={result['title']}"
+            )
+            print(f"   matched_terms={', '.join(result['matched_terms'])}")
+            print(f"   snippet={result['snippet']}")
 
 
 def read_qrels(path: Path) -> dict[str, dict[str, int]]:

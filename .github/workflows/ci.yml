@@ -23,6 +23,7 @@ jobs:
           python -m clinical_trial_matching.cli ingest-sample --trials data/fixtures/trials.sample.jsonl --output data/processed/sample_trials.jsonl
           python -m clinical_trial_matching.cli ingest-ctgov-studies --input data/fixtures/ctgov_v2_studies.sample.json --output data/processed/clinicaltrials/studies.sample.jsonl
           python -m clinical_trial_matching.cli report-trial-corpus --trials data/processed/clinicaltrials/studies.sample.jsonl --output outputs/clinicaltrials_sample_report.json
+          python -m clinical_trial_matching.cli search-trials-bm25 --trials data/processed/clinicaltrials/studies.sample.jsonl --query "adult persistent asthma inhaled corticosteroid" --top-k 5 --output outputs/clinicaltrials_sample_bm25_search.json
           python -m clinical_trial_matching.cli evaluate-baseline --trials data/fixtures/trials.sample.jsonl --topics data/fixtures/topics.sample.jsonl --qrels data/fixtures/qrels.sample.tsv --output outputs/sample_bm25_metrics.json
       - name: Sample TREC ingestion
         run: |

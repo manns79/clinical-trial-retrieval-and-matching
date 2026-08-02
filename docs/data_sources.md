@@ -82,6 +82,16 @@ ctmatch report-trial-corpus \
   --output outputs/clinicaltrials_asthma_recruiting_25_report.json
 ```
 
+Example BM25 search:
+
+```bash
+ctmatch search-trials-bm25 \
+  --trials data/processed/clinicaltrials/asthma_recruiting_25.jsonl \
+  --query "adult persistent asthma inhaled corticosteroid" \
+  --top-k 10 \
+  --output outputs/clinicaltrials_asthma_recruiting_25_search.json
+```
+
 The report summarizes:
 
 - total trial rows and unique NCT IDs
@@ -91,6 +101,14 @@ The report summarizes:
 - condition coverage and top conditions
 - intervention coverage and top interventions
 - a small sample of normalized records
+
+The BM25 search output includes:
+
+- query and retriever parameters
+- corpus size
+- ranked NCT IDs, titles, statuses, scores, and structured fields
+- matched query terms
+- a short snippet from searchable trial text
 
 ## TREC Clinical Trials
 

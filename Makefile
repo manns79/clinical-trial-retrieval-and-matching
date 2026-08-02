@@ -1,7 +1,7 @@
 PYTHON ?= python3
 PYTHONPATH ?= src
 
-.PHONY: install install-dev test compile ingest-sample ingest-ctgov-sample report-ctgov-sample download-ctgov-small evaluate-baseline ingest-trec-sample validate-trec-sample write-manifest-sample api docker-up docker-down clean
+.PHONY: install install-dev test compile ingest-sample ingest-ctgov-sample report-ctgov-sample search-ctgov-sample download-ctgov-small evaluate-baseline ingest-trec-sample validate-trec-sample write-manifest-sample api docker-up docker-down clean
 
 install:
 	$(PYTHON) -m pip install -e .
@@ -29,6 +29,13 @@ report-ctgov-sample:
 	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m clinical_trial_matching.cli report-trial-corpus \
 		--trials data/processed/clinicaltrials/studies.sample.jsonl \
 		--output outputs/clinicaltrials_sample_report.json
+
+search-ctgov-sample:
+	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m clinical_trial_matching.cli search-trials-bm25 \
+		--trials data/processed/clinicaltrials/studies.sample.jsonl \
+		--query "adult persistent asthma inhaled corticosteroid" \
+		--top-k 5 \
+		--output outputs/clinicaltrials_sample_bm25_search.json
 
 download-ctgov-small:
 	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m clinical_trial_matching.cli download-ctgov-studies \

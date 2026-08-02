@@ -4,6 +4,7 @@ import math
 import re
 from collections import Counter
 from collections.abc import Iterable
+from typing import Any
 
 from clinical_trial_matching.models import SearchResult, Trial
 
@@ -61,3 +62,86 @@ class BM25Retriever:
             SearchResult(nct_id=trial.nct_id, score=score, rank=rank, title=trial.title)
             for rank, (score, trial) in enumerate(scored[:top_k], start=1)
         ]
+
+
+def search_trials(
+    trials: Iterable[Trial],
+    *,
+    query: str,
+    top_k: int = 10,
+    k1: float = 1.5,
+    b: float = 0.75,
+    snippet_chars: int = 240,
+) -> dict[str, Any]:
+    trial_list = list(trials)
+    trial_by_id = {trial.nct_id: trial for trial in trial_list}
+    retriever = BM25Retriever(trial_list, k1=k1, b=b)
+    results = retriever.search(query, top_k=top_k)
+    return {
+        "query": query,
+        "retriever": "bm25",
+        "parameters": {
+            "top_k": top_k,
+            "k1": k1,
+            "b": b,
+        },
+        "corpus": {
+            "trials": len(trial_list),
+            "unique_nct_ids": len(trial_by_id),
+        },
+        "results": [
+            _result_record(result, trial_by_id[result.nct_id], query, snippet_chars)
+            for result in results
+        ],
+    }
+
+
+def _result_record(
+    result: SearchResult,
+    trial: Trial,
+    query: str,
+    snippet_chars: int,
+) -> dict[str, Any]:
+    return {
+        "rank": result.rank,
+        "score": round(result.score, 6),
+        "nct_id": trial.nct_id,
+        "title": trial.title,
+        "status": trial.status,
+        "conditions": list(trial.conditions),
+        "interventions": list(trial.interventions),
+        "sex": trial.sex,
+        "minimum_age": trial.minimum_age,
+        "maximum_age": trial.maximum_age,
+        "locations": list(trial.locations),
+        "matched_terms": matched_terms(query, trial.searchable_text),
+        "snippet": make_snippet(trial.searchable_text, query, snippet_chars),
+    }
+
+
+def matched_terms(query: str, text: str) -> list[str]:
+    query_terms = set(tokenize(query))
+    text_terms = set(tokenize(text))
+    return sorted(query_terms & text_terms)
+
+
+def make_snippet(text: str, query: str, max_chars: int = 240) -> str:
+    normalized = re.sub(r"\s+", " ", text).strip()
+    if max_chars < 1 or len(normalized) <= max_chars:
+        return normalized
+
+    query_terms = tokenize(query)
+    lowered = normalized.lower()
+    match_index = min(
+        (index for term in query_terms if (index := lowered.find(term)) >= 0),
+        default=0,
+    )
+    start = max(match_index - max_chars // 3, 0)
+    end = min(start + max_chars, len(normalized))
+    start = max(end - max_chars, 0)
+    snippet = normalized[start:end].strip()
+    if start > 0:
+        snippet = f"... {snippet}"
+    if end < len(normalized):
+        snippet = f"{snippet} ..."
+    return snippet
