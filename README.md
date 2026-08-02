@@ -19,6 +19,7 @@ make compile
 make test
 make ingest-sample
 make ingest-ctgov-sample
+make report-ctgov-sample
 make evaluate-baseline
 make ingest-trec-sample
 make validate-trec-sample
@@ -88,6 +89,14 @@ This command writes the raw API response, a source manifest with request/checksu
 
 ```bash
 make download-ctgov-small
+```
+
+After normalizing a trial corpus, generate a lightweight validation report:
+
+```bash
+ctmatch report-trial-corpus \
+  --trials data/processed/clinicaltrials/asthma_recruiting_25.jsonl \
+  --output outputs/clinicaltrials_asthma_recruiting_25_report.json
 ```
 
 Example command for a small local v2 API response:

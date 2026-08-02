@@ -1,7 +1,7 @@
 PYTHON ?= python3
 PYTHONPATH ?= src
 
-.PHONY: install install-dev test compile ingest-sample ingest-ctgov-sample download-ctgov-small evaluate-baseline ingest-trec-sample validate-trec-sample write-manifest-sample api docker-up docker-down clean
+.PHONY: install install-dev test compile ingest-sample ingest-ctgov-sample report-ctgov-sample download-ctgov-small evaluate-baseline ingest-trec-sample validate-trec-sample write-manifest-sample api docker-up docker-down clean
 
 install:
 	$(PYTHON) -m pip install -e .
@@ -24,6 +24,11 @@ ingest-ctgov-sample:
 	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m clinical_trial_matching.cli ingest-ctgov-studies \
 		--input data/fixtures/ctgov_v2_studies.sample.json \
 		--output data/processed/clinicaltrials/studies.sample.jsonl
+
+report-ctgov-sample:
+	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m clinical_trial_matching.cli report-trial-corpus \
+		--trials data/processed/clinicaltrials/studies.sample.jsonl \
+		--output outputs/clinicaltrials_sample_report.json
 
 download-ctgov-small:
 	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m clinical_trial_matching.cli download-ctgov-studies \

@@ -17,6 +17,7 @@ Current TREC ingestion status:
 - Source manifest/checksum writing is scaffolded under ignored local `data/manifests/` paths.
 - ClinicalTrials.gov v2 JSON study parsing is scaffolded for small API responses and fixtures.
 - Small live ClinicalTrials.gov query downloads are scaffolded with raw JSON, manifest, and normalized JSONL outputs.
+- Trial corpus validation reports are scaffolded for normalized ClinicalTrials.gov JSONL files.
 
 ## Milestone 2: Structured Retrieval
 

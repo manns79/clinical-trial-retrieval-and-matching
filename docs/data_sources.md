@@ -74,6 +74,24 @@ ctmatch download-ctgov-studies \
   --processed-output data/processed/clinicaltrials/asthma_recruiting_25.jsonl
 ```
 
+Example validation report:
+
+```bash
+ctmatch report-trial-corpus \
+  --trials data/processed/clinicaltrials/asthma_recruiting_25.jsonl \
+  --output outputs/clinicaltrials_asthma_recruiting_25_report.json
+```
+
+The report summarizes:
+
+- total trial rows and unique NCT IDs
+- duplicate NCT IDs
+- recruitment status distribution
+- missing eligibility criteria
+- condition coverage and top conditions
+- intervention coverage and top interventions
+- a small sample of normalized records
+
 ## TREC Clinical Trials
 
 The TREC Clinical Trials tracks provide patient topics and relevance judgments:
