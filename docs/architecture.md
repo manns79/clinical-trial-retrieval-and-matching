@@ -23,10 +23,12 @@ This keeps the portfolio artifact deployable without forcing paid database or mo
 
 - `GET /health`
 - `POST /search`
-- `GET /trial/{nct_id}` eventually backed by the database
+- `GET /trial/{nct_id}`
 - `GET /metrics/health` for lightweight operational checks
 
 `POST /search` currently uses the same in-memory BM25 path as the CLI command. It reads a normalized trial JSONL file from `TRIAL_CORPUS_PATH`, defaulting to `data/processed/clinicaltrials/studies.sample.jsonl`. The response includes retriever parameters, corpus size, ranked results, matched query terms, and snippets.
+
+`GET /trial/{nct_id}` returns the full normalized trial record from the same configured corpus. It is intended as the detail endpoint that search results can link to before the project moves to database-backed serving.
 
 ## Guardrails
 

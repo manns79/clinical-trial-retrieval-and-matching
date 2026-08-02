@@ -77,6 +77,74 @@ class ApiSearchTest(unittest.TestCase):
         self.assertIn("asthma", payload["results"][0]["matched_terms"])
         self.assertIn("snippet", payload["results"][0])
 
+    def test_get_trial_returns_normalized_trial_details(self) -> None:
+        from clinical_trial_matching.api.main import get_trial, load_trial_corpus
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            corpus_path = Path(tmpdir) / "trials.jsonl"
+            write_jsonl(
+                corpus_path,
+                [
+                    trial_to_flat_record(
+                        Trial(
+                            nct_id="NCT1",
+                            title="Asthma inhaler study",
+                            status="RECRUITING",
+                            conditions=("Asthma",),
+                            interventions=("Inhaled corticosteroid",),
+                            eligibility_criteria="Adults with persistent asthma and wheezing.",
+                            sex="ALL",
+                            minimum_age="18 Years",
+                            maximum_age="65 Years",
+                            phases=("PHASE2",),
+                            study_type="INTERVENTIONAL",
+                            locations=("Boston, Massachusetts, United States",),
+                            source={"kind": "test"},
+                        )
+                    )
+                ],
+            )
+            os.environ["TRIAL_CORPUS_PATH"] = str(corpus_path)
+            load_trial_corpus.cache_clear()
+
+            response = get_trial("nct1")
+
+        payload = response.model_dump()
+        self.assertEqual(payload["nct_id"], "NCT1")
+        self.assertEqual(payload["title"], "Asthma inhaler study")
+        self.assertEqual(payload["conditions"], ["Asthma"])
+        self.assertEqual(payload["interventions"], ["Inhaled corticosteroid"])
+        self.assertEqual(payload["minimum_age"], "18 Years")
+        self.assertEqual(payload["phases"], ["PHASE2"])
+        self.assertEqual(payload["source"], {"kind": "test"})
+
+    def test_get_trial_returns_404_when_nct_id_is_missing(self) -> None:
+        from fastapi import HTTPException
+
+        from clinical_trial_matching.api.main import get_trial, load_trial_corpus
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            corpus_path = Path(tmpdir) / "trials.jsonl"
+            write_jsonl(
+                corpus_path,
+                [
+                    trial_to_flat_record(
+                        Trial(
+                            nct_id="NCT1",
+                            title="Asthma inhaler study",
+                        )
+                    )
+                ],
+            )
+            os.environ["TRIAL_CORPUS_PATH"] = str(corpus_path)
+            load_trial_corpus.cache_clear()
+
+            with self.assertRaises(HTTPException) as context:
+                get_trial("NCT404")
+
+        self.assertEqual(context.exception.status_code, 404)
+        self.assertIn("Trial not found", context.exception.detail)
+
     def test_search_returns_503_when_configured_corpus_is_missing(self) -> None:
         from fastapi import HTTPException
 

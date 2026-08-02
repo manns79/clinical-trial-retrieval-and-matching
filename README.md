@@ -142,6 +142,12 @@ curl -X POST http://localhost:8000/search \
   -d '{"query":"adult persistent asthma inhaled corticosteroid","top_k":5}'
 ```
 
+Fetch a full normalized trial record:
+
+```bash
+curl http://localhost:8000/trial/NCT99991001
+```
+
 By default, the API reads `data/processed/clinicaltrials/studies.sample.jsonl`. To use a live downloaded corpus:
 
 ```bash
