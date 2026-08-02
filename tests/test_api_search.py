@@ -76,6 +76,35 @@ class ApiSearchTest(unittest.TestCase):
         self.assertEqual(payload["results"][0]["rank"], 1)
         self.assertIn("asthma", payload["results"][0]["matched_terms"])
         self.assertIn("snippet", payload["results"][0])
+        self.assertIn("latency_ms", payload)
+        self.assertGreaterEqual(payload["latency_ms"]["corpus_load"], 0)
+        self.assertGreaterEqual(payload["latency_ms"]["retrieval"], 0)
+        self.assertGreaterEqual(payload["latency_ms"]["total"], 0)
+
+    def test_timing_middleware_adds_process_time_header(self) -> None:
+        import asyncio
+
+        from fastapi import Response
+
+        from clinical_trial_matching.api.main import timing_middleware
+
+        class FakeUrl:
+            path = "/health"
+
+        class FakeRequest:
+            method = "GET"
+            url = FakeUrl()
+
+        async def call_next(_: FakeRequest) -> Response:
+            return Response(status_code=200)
+
+        async def call_middleware() -> str:
+            response = await timing_middleware(FakeRequest(), call_next)
+            return response.headers["X-Process-Time-Ms"]
+
+        process_time_ms = float(asyncio.run(call_middleware()))
+
+        self.assertGreaterEqual(process_time_ms, 0)
 
     def test_get_trial_returns_normalized_trial_details(self) -> None:
         from clinical_trial_matching.api.main import get_trial, load_trial_corpus

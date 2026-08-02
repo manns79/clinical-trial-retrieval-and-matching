@@ -28,6 +28,8 @@ This keeps the portfolio artifact deployable without forcing paid database or mo
 
 `POST /search` currently uses the same in-memory BM25 path as the CLI command. It reads a normalized trial JSONL file from `TRIAL_CORPUS_PATH`, defaulting to `data/processed/clinicaltrials/studies.sample.jsonl`. The response includes retriever parameters, corpus size, ranked results, matched query terms, and snippets.
 
+Search responses also include `latency_ms` for corpus loading, retrieval, and total handler time.
+
 `GET /trial/{nct_id}` returns the full normalized trial record from the same configured corpus. It is intended as the detail endpoint that search results can link to before the project moves to database-backed serving.
 
 ## Streamlit UI
@@ -39,6 +41,10 @@ The Streamlit UI is a thin client over FastAPI. It reads `API_BASE_URL`, default
 Docker Compose runs FastAPI, Streamlit, and Postgres/pgvector. The API service seeds the small synthetic ClinicalTrials.gov fixture into the mounted `data/processed/` directory before starting so a fresh local demo has a searchable corpus. The UI service uses `API_BASE_URL=http://api:8000` inside the Compose network.
 
 CI runs a Docker smoke check that builds the image, starts the API container with fixture data mounted, and verifies `/health`, `/search`, and `/trial/NCT99991001`.
+
+## Observability
+
+FastAPI includes request timing middleware that adds `X-Process-Time-Ms` to every response and logs structured JSON events for each HTTP request. The `/search` handler logs query length, requested `top_k`, corpus size, result count, and latency breakdown. Logs are written to stdout/stderr so Docker, Compose, and future hosted platforms can collect them without a paid observability service.
 
 ## Guardrails
 

@@ -142,6 +142,8 @@ curl -X POST http://localhost:8000/search \
   -d '{"query":"adult persistent asthma inhaled corticosteroid","top_k":5}'
 ```
 
+Search responses include `latency_ms` fields for corpus loading, retrieval, and total search handling. Every HTTP response also includes an `X-Process-Time-Ms` header, and the API writes structured JSON logs for HTTP requests and search events.
+
 Fetch a full normalized trial record:
 
 ```bash

@@ -24,6 +24,7 @@ Current TREC ingestion status:
 - Streamlit UI is scaffolded as a thin client over `/search` and `/trial/{nct_id}`.
 - Docker Compose runs API, Streamlit UI, and Postgres/pgvector with one command for the local demo.
 - GitHub Actions includes a Docker build and API smoke check.
+- API observability includes request timing headers, structured logs, and `/search` latency fields.
 
 ## Milestone 2: Structured Retrieval
 

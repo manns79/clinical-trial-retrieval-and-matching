@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import logging
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -13,14 +14,18 @@ from clinical_trial_matching.ingestion.clinicaltrials import (
 )
 from clinical_trial_matching.io import read_jsonl
 from clinical_trial_matching.models import Trial
+from clinical_trial_matching.observability import configure_logging, elapsed_ms, log_event, now_ms
 from clinical_trial_matching.retrieval.bm25 import search_trials
 
 try:
-    from fastapi import FastAPI, HTTPException
+    from fastapi import FastAPI, HTTPException, Request, Response
 except ImportError as exc:  # pragma: no cover - import-time developer guidance
     raise RuntimeError("Install API dependencies with `python3 -m pip install -e .`.") from exc
 
 DEFAULT_TRIAL_CORPUS_PATH = "data/processed/clinicaltrials/studies.sample.jsonl"
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
+LOGGER = logging.getLogger("clinical_trial_matching.api")
+configure_logging(LOG_LEVEL)
 
 
 class SearchRequest(BaseModel):
@@ -34,6 +39,7 @@ class SearchResponse(BaseModel):
     retriever: str
     parameters: dict[str, Any]
     corpus: dict[str, int]
+    latency_ms: dict[str, float]
     results: list[dict[str, Any]]
 
 
@@ -60,6 +66,25 @@ app = FastAPI(
 )
 
 
+@app.middleware("http")
+async def timing_middleware(request: Request, call_next: Any) -> Response:
+    start_ms = now_ms()
+    response = await call_next(request)
+    duration_ms = elapsed_ms(start_ms)
+    response.headers["X-Process-Time-Ms"] = str(duration_ms)
+    log_event(
+        LOGGER,
+        "http_request",
+        fields={
+            "method": request.method,
+            "path": request.url.path,
+            "status_code": response.status_code,
+            "duration_ms": duration_ms,
+        },
+    )
+    return response
+
+
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
@@ -67,12 +92,33 @@ def health() -> dict[str, str]:
 
 @app.post("/search", response_model=SearchResponse)
 def search(request: SearchRequest) -> SearchResponse:
+    total_start_ms = now_ms()
+    load_start_ms = now_ms()
     trials = load_trial_corpus()
+    corpus_load_ms = elapsed_ms(load_start_ms)
+    retrieval_start_ms = now_ms()
     payload = search_trials(
         trials,
         query=request.query,
         top_k=request.top_k,
         snippet_chars=request.snippet_chars,
+    )
+    retrieval_ms = elapsed_ms(retrieval_start_ms)
+    payload["latency_ms"] = {
+        "corpus_load": corpus_load_ms,
+        "retrieval": retrieval_ms,
+        "total": elapsed_ms(total_start_ms),
+    }
+    log_event(
+        LOGGER,
+        "search",
+        fields={
+            "query_length": len(request.query),
+            "top_k": request.top_k,
+            "corpus_trials": payload["corpus"]["trials"],
+            "result_count": len(payload["results"]),
+            "latency_ms": payload["latency_ms"],
+        },
     )
     return SearchResponse(**payload)
 
