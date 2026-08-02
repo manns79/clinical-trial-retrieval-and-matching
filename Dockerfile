@@ -8,8 +8,8 @@ WORKDIR /app
 COPY pyproject.toml README.md ./
 COPY src ./src
 
-RUN pip install --no-cache-dir -e .
+RUN pip install --no-cache-dir -e ".[ui]"
 
-EXPOSE 8000
+EXPOSE 8000 8501
 
 CMD ["uvicorn", "clinical_trial_matching.api.main:app", "--host", "0.0.0.0", "--port", "8000"]

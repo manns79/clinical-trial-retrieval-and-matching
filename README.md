@@ -177,6 +177,22 @@ make ui
 
 The UI opens at `http://localhost:8501` and calls the FastAPI service at `API_BASE_URL`, defaulting to `http://localhost:8000`.
 
+## Docker Compose Demo
+
+Run the local API + Streamlit UI demo with one command:
+
+```bash
+make docker-up
+```
+
+Compose starts:
+
+- FastAPI at `http://localhost:8000`
+- Streamlit at `http://localhost:8501`
+- Postgres/pgvector for the later database-backed milestone
+
+The API service seeds the small synthetic ClinicalTrials.gov fixture into `data/processed/clinicaltrials/studies.sample.jsonl` before starting. Generated data remains ignored by git.
+
 ## Repository Layout
 
 ```text

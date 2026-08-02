@@ -22,6 +22,7 @@ Current TREC ingestion status:
 - FastAPI `/search` is wired to the same BM25 path over a configured normalized trial JSONL corpus.
 - FastAPI `/trial/{nct_id}` returns full normalized trial details from the configured corpus.
 - Streamlit UI is scaffolded as a thin client over `/search` and `/trial/{nct_id}`.
+- Docker Compose runs API, Streamlit UI, and Postgres/pgvector with one command for the local demo.
 
 ## Milestone 2: Structured Retrieval
 

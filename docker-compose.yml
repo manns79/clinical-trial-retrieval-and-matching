@@ -11,8 +11,44 @@ services:
     volumes:
       - ./data:/app/data
       - ./outputs:/app/outputs
+    command:
+      - sh
+      - -c
+      - >
+        python -m clinical_trial_matching.cli ingest-ctgov-studies
+        --input /app/data/fixtures/ctgov_v2_studies.sample.json
+        --output /app/data/processed/clinicaltrials/studies.sample.jsonl
+        && uvicorn clinical_trial_matching.api.main:app --host 0.0.0.0 --port 8000
     depends_on:
       db:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=2).read()"
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  ui:
+    build: .
+    environment:
+      APP_ENV: local
+      API_BASE_URL: http://api:8000
+    ports:
+      - "8501:8501"
+    command:
+      - python
+      - -m
+      - streamlit
+      - run
+      - src/clinical_trial_matching/ui/streamlit_app.py
+      - --server.address=0.0.0.0
+      - --server.port=8501
+    depends_on:
+      api:
         condition: service_healthy
 
   db:
