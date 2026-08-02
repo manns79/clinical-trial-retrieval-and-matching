@@ -21,6 +21,7 @@ Current TREC ingestion status:
 - BM25 command-line search is scaffolded for normalized ClinicalTrials.gov JSONL files.
 - FastAPI `/search` is wired to the same BM25 path over a configured normalized trial JSONL corpus.
 - FastAPI `/trial/{nct_id}` returns full normalized trial details from the configured corpus.
+- Streamlit UI is scaffolded as a thin client over `/search` and `/trial/{nct_id}`.
 
 ## Milestone 2: Structured Retrieval
 

@@ -154,6 +154,29 @@ By default, the API reads `data/processed/clinicaltrials/studies.sample.jsonl`. 
 TRIAL_CORPUS_PATH=data/processed/clinicaltrials/asthma_recruiting_25.jsonl make api
 ```
 
+## Streamlit UI
+
+Install the UI extra:
+
+```bash
+python3 -m pip install -e ".[ui]"
+```
+
+Start the API:
+
+```bash
+make ingest-ctgov-sample
+make api
+```
+
+In another terminal, start Streamlit:
+
+```bash
+make ui
+```
+
+The UI opens at `http://localhost:8501` and calls the FastAPI service at `API_BASE_URL`, defaulting to `http://localhost:8000`.
+
 ## Repository Layout
 
 ```text

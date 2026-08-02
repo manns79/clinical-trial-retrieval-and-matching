@@ -1,13 +1,16 @@
 PYTHON ?= python3
 PYTHONPATH ?= src
 
-.PHONY: install install-dev test compile ingest-sample ingest-ctgov-sample report-ctgov-sample search-ctgov-sample download-ctgov-small evaluate-baseline ingest-trec-sample validate-trec-sample write-manifest-sample api docker-up docker-down clean
+.PHONY: install install-dev install-ui test compile ingest-sample ingest-ctgov-sample report-ctgov-sample search-ctgov-sample download-ctgov-small evaluate-baseline ingest-trec-sample validate-trec-sample write-manifest-sample api ui docker-up docker-down clean
 
 install:
 	$(PYTHON) -m pip install -e .
 
 install-dev:
 	$(PYTHON) -m pip install -e ".[dev,ml]"
+
+install-ui:
+	$(PYTHON) -m pip install -e ".[ui]"
 
 test:
 	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m unittest discover -s tests
@@ -82,6 +85,9 @@ write-manifest-sample:
 
 api:
 	PYTHONPATH=$(PYTHONPATH) uvicorn clinical_trial_matching.api.main:app --reload --host 0.0.0.0 --port 8000
+
+ui:
+	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m streamlit run src/clinical_trial_matching/ui/streamlit_app.py --server.port 8501
 
 docker-up:
 	docker compose up --build

@@ -16,7 +16,7 @@ This keeps the portfolio artifact deployable without forcing paid database or mo
 - Retrieval: BM25 baseline, metadata filters, dense retrieval, hybrid fusion, and reranking.
 - Evaluation: TREC-style qrels, reproducible run files, and metrics such as Recall@100, nDCG, MRR, and Precision@k.
 - API: FastAPI service for search, trial lookup, health, and later explanation endpoints.
-- UI: Streamlit or React frontend once the API contracts stabilize.
+- UI: Streamlit client over the FastAPI search and trial-detail endpoints.
 - Observability: structured logs, latency timing, health checks, and retrieval regression tests.
 
 ## Initial API Surface
@@ -29,6 +29,10 @@ This keeps the portfolio artifact deployable without forcing paid database or mo
 `POST /search` currently uses the same in-memory BM25 path as the CLI command. It reads a normalized trial JSONL file from `TRIAL_CORPUS_PATH`, defaulting to `data/processed/clinicaltrials/studies.sample.jsonl`. The response includes retriever parameters, corpus size, ranked results, matched query terms, and snippets.
 
 `GET /trial/{nct_id}` returns the full normalized trial record from the same configured corpus. It is intended as the detail endpoint that search results can link to before the project moves to database-backed serving.
+
+## Streamlit UI
+
+The Streamlit UI is a thin client over FastAPI. It reads `API_BASE_URL`, defaults to `http://localhost:8000`, calls `/metrics/health`, posts searches to `/search`, and fetches details from `/trial/{nct_id}`. It does not run retrieval locally.
 
 ## Guardrails
 
