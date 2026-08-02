@@ -26,6 +26,8 @@ This keeps the portfolio artifact deployable without forcing paid database or mo
 - `GET /trial/{nct_id}` eventually backed by the database
 - `GET /metrics/health` for lightweight operational checks
 
+`POST /search` currently uses the same in-memory BM25 path as the CLI command. It reads a normalized trial JSONL file from `TRIAL_CORPUS_PATH`, defaulting to `data/processed/clinicaltrials/studies.sample.jsonl`. The response includes retriever parameters, corpus size, ranked results, matched query terms, and snippets.
+
 ## Guardrails
 
 - Always distinguish benchmark snapshots from live ClinicalTrials.gov data.

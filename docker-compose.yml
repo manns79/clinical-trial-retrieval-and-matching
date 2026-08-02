@@ -5,6 +5,7 @@ services:
       APP_ENV: local
       DATABASE_URL: postgresql+psycopg://trials:trials@db:5432/trials
       DATA_DIR: /app/data
+      TRIAL_CORPUS_PATH: /app/data/processed/clinicaltrials/studies.sample.jsonl
     ports:
       - "8000:8000"
     volumes:

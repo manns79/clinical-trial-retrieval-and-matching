@@ -19,6 +19,7 @@ Current TREC ingestion status:
 - Small live ClinicalTrials.gov query downloads are scaffolded with raw JSON, manifest, and normalized JSONL outputs.
 - Trial corpus validation reports are scaffolded for normalized ClinicalTrials.gov JSONL files.
 - BM25 command-line search is scaffolded for normalized ClinicalTrials.gov JSONL files.
+- FastAPI `/search` is wired to the same BM25 path over a configured normalized trial JSONL corpus.
 
 ## Milestone 2: Structured Retrieval
 

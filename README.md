@@ -128,10 +128,25 @@ To run the API after installing dependencies:
 
 ```bash
 python3 -m pip install -e .
+make ingest-ctgov-sample
 make api
 ```
 
-Then visit `http://localhost:8000/health`.
+Then visit `http://localhost:8000/health` or `http://localhost:8000/metrics/health`.
+
+Search the configured corpus:
+
+```bash
+curl -X POST http://localhost:8000/search \
+  -H "Content-Type: application/json" \
+  -d '{"query":"adult persistent asthma inhaled corticosteroid","top_k":5}'
+```
+
+By default, the API reads `data/processed/clinicaltrials/studies.sample.jsonl`. To use a live downloaded corpus:
+
+```bash
+TRIAL_CORPUS_PATH=data/processed/clinicaltrials/asthma_recruiting_25.jsonl make api
+```
 
 ## Repository Layout
 
