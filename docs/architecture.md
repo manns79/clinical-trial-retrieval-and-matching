@@ -46,6 +46,10 @@ CI runs a Docker smoke check that builds the image, starts the API container wit
 
 FastAPI includes request timing middleware that adds `X-Process-Time-Ms` to every response and logs structured JSON events for each HTTP request. The `/search` handler logs query length, requested `top_k`, corpus size, result count, and latency breakdown. Logs are written to stdout/stderr so Docker, Compose, and future hosted platforms can collect them without a paid observability service.
 
+## Retrieval Regression
+
+CI runs a tiny deterministic BM25 regression check over synthetic trial/topic/qrels fixtures. It records the full run and metrics, then fails if configured thresholds such as Recall@100, MRR, or nDCG@10 drop. This is intentionally small and fast; larger TREC evaluations remain a separate benchmark workflow.
+
 ## Guardrails
 
 - Always distinguish benchmark snapshots from live ClinicalTrials.gov data.

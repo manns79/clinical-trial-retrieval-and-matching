@@ -1,7 +1,7 @@
 PYTHON ?= python3
 PYTHONPATH ?= src
 
-.PHONY: install install-dev install-ui test compile ingest-sample ingest-ctgov-sample report-ctgov-sample search-ctgov-sample download-ctgov-small evaluate-baseline ingest-trec-sample validate-trec-sample write-manifest-sample api ui docker-up docker-down docker-smoke clean
+.PHONY: install install-dev install-ui test compile ingest-sample ingest-ctgov-sample report-ctgov-sample search-ctgov-sample download-ctgov-small evaluate-baseline check-retrieval-regression ingest-trec-sample validate-trec-sample write-manifest-sample api ui docker-up docker-down docker-smoke clean
 
 install:
 	$(PYTHON) -m pip install -e .
@@ -55,6 +55,13 @@ evaluate-baseline:
 		--topics data/fixtures/topics.sample.jsonl \
 		--qrels data/fixtures/qrels.sample.tsv \
 		--output outputs/sample_bm25_metrics.json
+
+check-retrieval-regression:
+	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m clinical_trial_matching.cli check-retrieval-regression \
+		--trials data/fixtures/trials.sample.jsonl \
+		--topics data/fixtures/topics.sample.jsonl \
+		--qrels data/fixtures/qrels.sample.tsv \
+		--output outputs/retrieval_regression.json
 
 ingest-trec-sample:
 	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m clinical_trial_matching.cli ingest-trec-topics \

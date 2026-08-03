@@ -4,6 +4,10 @@ import argparse
 from pathlib import Path
 
 from clinical_trial_matching.evaluation.metrics import summarize_run
+from clinical_trial_matching.evaluation.regression import (
+    DEFAULT_THRESHOLDS,
+    run_bm25_regression_check,
+)
 from clinical_trial_matching.ingestion.clinicaltrials import (
     CTGOV_API_BASE_URL,
     fetch_ctgov_studies,
@@ -26,6 +30,7 @@ from clinical_trial_matching.ingestion.trec import (
     validate_topics_and_qrels,
 )
 from clinical_trial_matching.io import read_jsonl, write_json, write_jsonl
+from clinical_trial_matching.models import Qrel
 from clinical_trial_matching.retrieval.bm25 import BM25Retriever, search_trials
 from clinical_trial_matching.validation.trials import summarize_trial_corpus
 
@@ -63,6 +68,19 @@ def main() -> None:
     evaluate.add_argument("--qrels", type=Path, required=True)
     evaluate.add_argument("--output", type=Path, required=True)
     evaluate.add_argument("--top-k", type=int, default=100)
+
+    regression = subparsers.add_parser(
+        "check-retrieval-regression",
+        help="Run tiny BM25 retrieval-quality regression checks and fail on metric regressions.",
+    )
+    regression.add_argument("--trials", type=Path, required=True)
+    regression.add_argument("--topics", type=Path, required=True)
+    regression.add_argument("--qrels", type=Path, required=True)
+    regression.add_argument("--output", type=Path, required=True)
+    regression.add_argument("--top-k", type=int, default=100)
+    regression.add_argument("--min-recall-at-100", type=float, default=DEFAULT_THRESHOLDS["recall_at_100"])
+    regression.add_argument("--min-mrr", type=float, default=DEFAULT_THRESHOLDS["mrr"])
+    regression.add_argument("--min-ndcg-at-10", type=float, default=DEFAULT_THRESHOLDS["ndcg_at_10"])
 
     trial_report = subparsers.add_parser(
         "report-trial-corpus", help="Summarize a normalized trial JSONL corpus."
@@ -138,6 +156,19 @@ def main() -> None:
         )
     elif args.command == "evaluate-baseline":
         evaluate_baseline(args.trials, args.topics, args.qrels, args.output, args.top_k)
+    elif args.command == "check-retrieval-regression":
+        check_retrieval_regression(
+            trials_path=args.trials,
+            topics_path=args.topics,
+            qrels_path=args.qrels,
+            output_path=args.output,
+            top_k=args.top_k,
+            thresholds={
+                "recall_at_100": args.min_recall_at_100,
+                "mrr": args.min_mrr,
+                "ndcg_at_10": args.min_ndcg_at_10,
+            },
+        )
     elif args.command == "report-trial-corpus":
         report_trial_corpus(args.trials, args.output, args.sample_size, args.top_n)
     elif args.command == "search-trials-bm25":
@@ -246,6 +277,35 @@ def evaluate_baseline(
     print(f"Wrote baseline metrics to {output_path}")
 
 
+def check_retrieval_regression(
+    *,
+    trials_path: Path,
+    topics_path: Path,
+    qrels_path: Path,
+    output_path: Path,
+    top_k: int,
+    thresholds: dict[str, float],
+) -> None:
+    trials = [trial_from_flat_record(row) for row in read_jsonl(trials_path)]
+    topics = [topic_from_json_record(row) for row in read_jsonl(topics_path)]
+    qrels = read_qrels_records(qrels_path)
+    report = run_bm25_regression_check(
+        trials=trials,
+        topics=topics,
+        qrels=qrels,
+        thresholds=thresholds,
+        top_k=top_k,
+    )
+    write_json(output_path, report)
+    if report["failures"]:
+        failures = ", ".join(
+            f"{failure['metric']}={failure['observed']} < {failure['threshold']}"
+            for failure in report["failures"]
+        )
+        raise SystemExit(f"Retrieval regression check failed: {failures}")
+    print(f"Wrote passing retrieval regression report to {output_path}")
+
+
 def report_trial_corpus(
     trials_path: Path,
     output_path: Path | None,
@@ -301,6 +361,12 @@ def read_qrels(path: Path) -> dict[str, dict[str, int]]:
     if path.suffix == ".jsonl":
         return qrels_to_mapping([qrel_from_json_record(row) for row in read_jsonl(path)])
     return qrels_to_mapping(parse_qrels(path))
+
+
+def read_qrels_records(path: Path) -> list[Qrel]:
+    if path.suffix == ".jsonl":
+        return [qrel_from_json_record(row) for row in read_jsonl(path)]
+    return parse_qrels(path)
 
 
 def ingest_trec_topics(year: int, input_path: Path, output_path: Path) -> None:

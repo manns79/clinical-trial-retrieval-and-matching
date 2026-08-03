@@ -25,6 +25,7 @@ Current TREC ingestion status:
 - Docker Compose runs API, Streamlit UI, and Postgres/pgvector with one command for the local demo.
 - GitHub Actions includes a Docker build and API smoke check.
 - API observability includes request timing headers, structured logs, and `/search` latency fields.
+- Tiny BM25 retrieval-quality regression checks run in CI over fixed synthetic fixtures.
 
 ## Milestone 2: Structured Retrieval
 

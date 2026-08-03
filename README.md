@@ -22,6 +22,7 @@ make ingest-ctgov-sample
 make report-ctgov-sample
 make search-ctgov-sample
 make evaluate-baseline
+make check-retrieval-regression
 make ingest-trec-sample
 make validate-trec-sample
 make write-manifest-sample
@@ -109,6 +110,14 @@ ctmatch search-trials-bm25 \
   --top-k 10 \
   --output outputs/clinicaltrials_asthma_recruiting_25_search.json
 ```
+
+Run the tiny BM25 retrieval-quality regression check:
+
+```bash
+make check-retrieval-regression
+```
+
+This uses fixed synthetic trial/topic/qrels fixtures and fails if recall, MRR, or nDCG drops below the configured thresholds.
 
 Example command for a small local v2 API response:
 
