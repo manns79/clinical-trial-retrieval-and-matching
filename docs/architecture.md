@@ -50,6 +50,10 @@ FastAPI includes request timing middleware that adds `X-Process-Time-Ms` to ever
 
 CI runs a tiny deterministic BM25 regression check over synthetic trial/topic/qrels fixtures. It records the full run and metrics, then fails if configured thresholds such as Recall@100, MRR, or nDCG@10 drop. This is intentionally small and fast; larger TREC evaluations remain a separate benchmark workflow.
 
+## TREC-Style Evaluation
+
+The BM25 benchmark command reads normalized trial JSONL, normalized TREC topic JSONL, and qrels, then writes both a six-column TREC run file and a metrics JSON report. Generated run files and reports belong under ignored `outputs/` paths.
+
 ## Guardrails
 
 - Always distinguish benchmark snapshots from live ClinicalTrials.gov data.

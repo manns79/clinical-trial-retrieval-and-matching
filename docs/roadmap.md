@@ -26,6 +26,7 @@ Current TREC ingestion status:
 - GitHub Actions includes a Docker build and API smoke check.
 - API observability includes request timing headers, structured logs, and `/search` latency fields.
 - Tiny BM25 retrieval-quality regression checks run in CI over fixed synthetic fixtures.
+- TREC-style BM25 evaluation writes run files and metrics reports from normalized local benchmark files.
 
 ## Milestone 2: Structured Retrieval
 

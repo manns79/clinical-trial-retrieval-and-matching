@@ -8,6 +8,11 @@ from clinical_trial_matching.evaluation.regression import (
     DEFAULT_THRESHOLDS,
     run_bm25_regression_check,
 )
+from clinical_trial_matching.evaluation.trec import (
+    bm25_trec_evaluation_report,
+    build_bm25_trec_run,
+    write_trec_run,
+)
 from clinical_trial_matching.ingestion.clinicaltrials import (
     CTGOV_API_BASE_URL,
     fetch_ctgov_studies,
@@ -68,6 +73,18 @@ def main() -> None:
     evaluate.add_argument("--qrels", type=Path, required=True)
     evaluate.add_argument("--output", type=Path, required=True)
     evaluate.add_argument("--top-k", type=int, default=100)
+
+    trec_bm25 = subparsers.add_parser(
+        "evaluate-trec-bm25",
+        help="Write a TREC-format BM25 run file and metrics report from normalized benchmark files.",
+    )
+    trec_bm25.add_argument("--trials", type=Path, required=True)
+    trec_bm25.add_argument("--topics", type=Path, required=True)
+    trec_bm25.add_argument("--qrels", type=Path, required=True)
+    trec_bm25.add_argument("--run-output", type=Path, required=True)
+    trec_bm25.add_argument("--metrics-output", type=Path, required=True)
+    trec_bm25.add_argument("--run-name", default="bm25")
+    trec_bm25.add_argument("--top-k", type=int, default=100)
 
     regression = subparsers.add_parser(
         "check-retrieval-regression",
@@ -156,6 +173,16 @@ def main() -> None:
         )
     elif args.command == "evaluate-baseline":
         evaluate_baseline(args.trials, args.topics, args.qrels, args.output, args.top_k)
+    elif args.command == "evaluate-trec-bm25":
+        evaluate_trec_bm25(
+            trials_path=args.trials,
+            topics_path=args.topics,
+            qrels_path=args.qrels,
+            run_output_path=args.run_output,
+            metrics_output_path=args.metrics_output,
+            run_name=args.run_name,
+            top_k=args.top_k,
+        )
     elif args.command == "check-retrieval-regression":
         check_retrieval_regression(
             trials_path=args.trials,
@@ -275,6 +302,34 @@ def evaluate_baseline(
     payload = {"run_name": "sample_bm25", "metrics": metrics, "topics": len(topics), "trials": len(trials)}
     write_json(output_path, payload)
     print(f"Wrote baseline metrics to {output_path}")
+
+
+def evaluate_trec_bm25(
+    *,
+    trials_path: Path,
+    topics_path: Path,
+    qrels_path: Path,
+    run_output_path: Path,
+    metrics_output_path: Path,
+    run_name: str,
+    top_k: int,
+) -> None:
+    trials = [trial_from_flat_record(row) for row in read_jsonl(trials_path)]
+    topics = [topic_from_json_record(row) for row in read_jsonl(topics_path)]
+    qrels = read_qrels_records(qrels_path)
+    rows = build_bm25_trec_run(trials=trials, topics=topics, run_name=run_name, top_k=top_k)
+    write_trec_run(run_output_path, rows)
+    report = bm25_trec_evaluation_report(
+        rows=rows,
+        qrels=qrels,
+        run_name=run_name,
+        top_k=top_k,
+        topics_count=len(topics),
+        trials_count=len(trials),
+    )
+    write_json(metrics_output_path, report)
+    print(f"Wrote TREC run file to {run_output_path}")
+    print(f"Wrote TREC BM25 metrics report to {metrics_output_path}")
 
 
 def check_retrieval_regression(

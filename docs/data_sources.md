@@ -110,6 +110,20 @@ The BM25 search output includes:
 - matched query terms
 - a short snippet from searchable trial text
 
+Example TREC-style BM25 evaluation:
+
+```bash
+ctmatch evaluate-trec-bm25 \
+  --trials data/processed/clinicaltrials/benchmark_trials.jsonl \
+  --topics data/processed/trec/2021/topics.jsonl \
+  --qrels data/processed/trec/2021/qrels.jsonl \
+  --run-output outputs/trec_2021_bm25.run \
+  --metrics-output outputs/trec_2021_bm25_metrics.json \
+  --run-name bm25_2021
+```
+
+The run file uses six-column TREC format: topic ID, `Q0`, NCT ID, rank, score, and run name. The metrics report currently includes Precision@10, Recall@100, MRR, nDCG@10, and nDCG@100.
+
 ## TREC Clinical Trials
 
 The TREC Clinical Trials tracks provide patient topics and relevance judgments:

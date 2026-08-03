@@ -22,6 +22,7 @@ make ingest-ctgov-sample
 make report-ctgov-sample
 make search-ctgov-sample
 make evaluate-baseline
+make evaluate-trec-bm25-sample
 make check-retrieval-regression
 make ingest-trec-sample
 make validate-trec-sample
@@ -118,6 +119,24 @@ make check-retrieval-regression
 ```
 
 This uses fixed synthetic trial/topic/qrels fixtures and fails if recall, MRR, or nDCG drops below the configured thresholds.
+
+Write a TREC-format BM25 run file and metrics report:
+
+```bash
+ctmatch evaluate-trec-bm25 \
+  --trials data/processed/clinicaltrials/benchmark_trials.jsonl \
+  --topics data/processed/trec/2021/topics.jsonl \
+  --qrels data/processed/trec/2021/qrels.jsonl \
+  --run-output outputs/trec_2021_bm25.run \
+  --metrics-output outputs/trec_2021_bm25_metrics.json \
+  --run-name bm25_2021
+```
+
+The run file uses standard TREC format:
+
+```text
+topic_id Q0 nct_id rank score run_name
+```
 
 Example command for a small local v2 API response:
 
