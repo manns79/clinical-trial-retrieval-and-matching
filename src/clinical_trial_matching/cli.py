@@ -15,6 +15,7 @@ from clinical_trial_matching.evaluation.trec import (
 )
 from clinical_trial_matching.ingestion.clinicaltrials import (
     CTGOV_API_BASE_URL,
+    fetch_ctgov_studies_by_ids,
     fetch_ctgov_studies,
     parse_studies_json,
     trial_from_flat_record,
@@ -66,6 +67,26 @@ def main() -> None:
     ctgov_live.add_argument("--processed-output", type=Path, required=True)
     ctgov_live.add_argument("--base-url", default=CTGOV_API_BASE_URL)
     ctgov_live.add_argument("--timeout-seconds", type=float, default=30.0)
+
+    trec_corpus = subparsers.add_parser(
+        "build-trec-trial-corpus",
+        help="Extract NCT IDs from qrels, fetch ClinicalTrials.gov records, and normalize a trial corpus.",
+    )
+    trec_corpus.add_argument("--qrels", type=Path, required=True)
+    trec_corpus.add_argument("--raw-output", type=Path, required=True)
+    trec_corpus.add_argument("--processed-output", type=Path, required=True)
+    trec_corpus.add_argument("--manifest-output", type=Path, required=True)
+    trec_corpus.add_argument("--report-output", type=Path, required=True)
+    trec_corpus.add_argument("--dataset", default="trec_clinical_trials")
+    trec_corpus.add_argument("--year", type=int, required=True)
+    trec_corpus.add_argument("--batch-size", type=int, default=100)
+    trec_corpus.add_argument("--limit", type=int)
+    trec_corpus.add_argument("--delay-seconds", type=float, default=0.0)
+    trec_corpus.add_argument("--max-retries", type=int, default=5)
+    trec_corpus.add_argument("--retry-initial-delay-seconds", type=float, default=2.0)
+    trec_corpus.add_argument("--retry-max-delay-seconds", type=float, default=60.0)
+    trec_corpus.add_argument("--base-url", default=CTGOV_API_BASE_URL)
+    trec_corpus.add_argument("--timeout-seconds", type=float, default=30.0)
 
     evaluate = subparsers.add_parser("evaluate-baseline", help="Evaluate BM25 on fixture data.")
     evaluate.add_argument("--trials", type=Path, required=True)
@@ -168,6 +189,24 @@ def main() -> None:
             raw_output=args.raw_output,
             manifest_output=args.manifest_output,
             processed_output=args.processed_output,
+            base_url=args.base_url,
+            timeout_seconds=args.timeout_seconds,
+        )
+    elif args.command == "build-trec-trial-corpus":
+        build_trec_trial_corpus(
+            qrels_path=args.qrels,
+            raw_output=args.raw_output,
+            processed_output=args.processed_output,
+            manifest_output=args.manifest_output,
+            report_output=args.report_output,
+            dataset=args.dataset,
+            year=args.year,
+            batch_size=args.batch_size,
+            limit=args.limit,
+            delay_seconds=args.delay_seconds,
+            max_retries=args.max_retries,
+            retry_initial_delay_seconds=args.retry_initial_delay_seconds,
+            retry_max_delay_seconds=args.retry_max_delay_seconds,
             base_url=args.base_url,
             timeout_seconds=args.timeout_seconds,
         )
@@ -280,6 +319,88 @@ def download_ctgov_studies(
     print(f"Wrote raw ClinicalTrials.gov response to {raw_output}")
     print(f"Wrote {len(trials)} normalized ClinicalTrials.gov studies to {processed_output}")
     print(f"Wrote source manifest to {manifest_output}")
+
+
+def build_trec_trial_corpus(
+    *,
+    qrels_path: Path,
+    raw_output: Path,
+    processed_output: Path,
+    manifest_output: Path,
+    report_output: Path,
+    dataset: str,
+    year: int,
+    batch_size: int,
+    limit: int | None,
+    delay_seconds: float,
+    max_retries: int,
+    retry_initial_delay_seconds: float,
+    retry_max_delay_seconds: float,
+    base_url: str,
+    timeout_seconds: float,
+) -> None:
+    qrels = read_qrels_records(qrels_path)
+    nct_ids = unique_nct_ids_from_qrels(qrels)
+    if limit is not None:
+        if limit < 1:
+            raise ValueError("Limit must be at least 1 when provided")
+        nct_ids = nct_ids[:limit]
+    result = fetch_ctgov_studies_by_ids(
+        nct_ids=nct_ids,
+        batch_size=batch_size,
+        base_url=base_url,
+        timeout_seconds=timeout_seconds,
+        delay_seconds=delay_seconds,
+        max_retries=max_retries,
+        retry_initial_delay_seconds=retry_initial_delay_seconds,
+        retry_max_delay_seconds=retry_max_delay_seconds,
+    )
+    write_json(raw_output, result.payload)
+
+    trials = parse_studies_json(raw_output)
+    write_jsonl(processed_output, (trial_to_flat_record(trial) for trial in trials))
+
+    manifest = build_source_manifest(
+        name=f"{dataset}_{year}_clinicaltrials_corpus",
+        source_url=f"{base_url.rstrip('/')}/studies",
+        input_path=raw_output,
+        dataset=dataset,
+        year=year,
+        parser="clinicaltrials_gov_v2_id_corpus",
+        metadata={
+            "qrels_path": str(qrels_path),
+            "requested_nct_ids": str(len(result.requested_nct_ids)),
+            "found_nct_ids": str(len(result.found_nct_ids)),
+            "missing_nct_ids": str(len(result.missing_nct_ids)),
+            "batch_size": str(batch_size),
+            "limit": str(limit or ""),
+            "request_count": str(len(result.request_urls)),
+            "max_retries": str(max_retries),
+            "retry_initial_delay_seconds": str(retry_initial_delay_seconds),
+            "retry_max_delay_seconds": str(retry_max_delay_seconds),
+        },
+    )
+    write_json(manifest_output, manifest_to_json_record(manifest))
+
+    report = {
+        "dataset": dataset,
+        "year": year,
+        "qrels": len(qrels),
+        "requested_nct_ids": len(result.requested_nct_ids),
+        "found_nct_ids": len(result.found_nct_ids),
+        "missing_nct_ids": len(result.missing_nct_ids),
+        "missing_nct_ids_sample": list(result.missing_nct_ids[:20]),
+        "raw_output": str(raw_output),
+        "processed_output": str(processed_output),
+        "manifest_output": str(manifest_output),
+        "request_count": len(result.request_urls),
+    }
+    write_json(report_output, report)
+
+    print(f"Wrote raw ClinicalTrials.gov corpus to {raw_output}")
+    print(f"Wrote {len(trials)} normalized benchmark trials to {processed_output}")
+    print(f"Wrote source manifest to {manifest_output}")
+    print(f"Wrote corpus build report to {report_output}")
 
 
 def evaluate_baseline(
@@ -422,6 +543,18 @@ def read_qrels_records(path: Path) -> list[Qrel]:
     if path.suffix == ".jsonl":
         return [qrel_from_json_record(row) for row in read_jsonl(path)]
     return parse_qrels(path)
+
+
+def unique_nct_ids_from_qrels(qrels: list[Qrel]) -> list[str]:
+    nct_ids: list[str] = []
+    seen: set[str] = set()
+    for qrel in qrels:
+        nct_id = qrel.nct_id.strip().upper()
+        if not nct_id or nct_id in seen:
+            continue
+        nct_ids.append(nct_id)
+        seen.add(nct_id)
+    return nct_ids
 
 
 def ingest_trec_topics(year: int, input_path: Path, output_path: Path) -> None:

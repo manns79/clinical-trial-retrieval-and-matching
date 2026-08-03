@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from time import sleep
 from typing import Any
 
 from clinical_trial_matching.io import read_json
@@ -9,6 +10,7 @@ from clinical_trial_matching.models import Trial
 
 CTGOV_API_BASE_URL = "https://clinicaltrials.gov/api/v2"
 CTGOV_STUDIES_ENDPOINT = "/studies"
+RETRYABLE_HTTP_STATUS_CODES = {429, 500, 502, 503, 504}
 
 
 @dataclass(frozen=True)
@@ -18,6 +20,15 @@ class CtgovDownloadResult:
     study_count: int
     total_count: int | None
     next_page_token: str
+
+
+@dataclass(frozen=True)
+class CtgovIdCorpusDownloadResult:
+    payload: dict[str, Any]
+    request_urls: tuple[str, ...]
+    requested_nct_ids: tuple[str, ...]
+    found_nct_ids: tuple[str, ...]
+    missing_nct_ids: tuple[str, ...]
 
 
 def _as_tuple(value: Any) -> tuple[str, ...]:
@@ -129,6 +140,159 @@ def fetch_ctgov_studies(
     )
 
 
+def fetch_ctgov_studies_by_ids(
+    *,
+    nct_ids: list[str],
+    batch_size: int = 100,
+    base_url: str = CTGOV_API_BASE_URL,
+    timeout_seconds: float = 30.0,
+    delay_seconds: float = 0.0,
+    max_retries: int = 5,
+    retry_initial_delay_seconds: float = 2.0,
+    retry_max_delay_seconds: float = 60.0,
+    client: Any = None,
+) -> CtgovIdCorpusDownloadResult:
+    requested_ids = normalize_nct_ids(nct_ids)
+    if not requested_ids:
+        raise ValueError("At least one NCT ID is required")
+    if batch_size < 1 or batch_size > 1000:
+        raise ValueError("ClinicalTrials.gov batch size must be between 1 and 1000")
+    if delay_seconds < 0:
+        raise ValueError("Delay seconds cannot be negative")
+    if max_retries < 0:
+        raise ValueError("Max retries cannot be negative")
+    if retry_initial_delay_seconds < 0:
+        raise ValueError("Retry initial delay seconds cannot be negative")
+    if retry_max_delay_seconds < retry_initial_delay_seconds:
+        raise ValueError("Retry max delay seconds must be at least retry initial delay seconds")
+
+    close_client = client is None
+    if client is None:
+        try:
+            import httpx
+        except ImportError as exc:
+            raise RuntimeError(
+                "Install project dependencies with `python3 -m pip install -e .` before live downloads."
+            ) from exc
+        http_client = httpx.Client(timeout=timeout_seconds)
+    else:
+        http_client = client
+
+    studies_by_id: dict[str, dict[str, Any]] = {}
+    request_urls: list[str] = []
+    try:
+        batches = list(_chunks(requested_ids, batch_size))
+        for batch_index, batch in enumerate(batches):
+            page_token = ""
+            while True:
+                params: dict[str, str | int] = {
+                    "format": "json",
+                    "query.id": " OR ".join(batch),
+                    "pageSize": min(max(len(batch), 1), 1000),
+                    "countTotal": "true",
+                }
+                if page_token:
+                    params["pageToken"] = page_token
+                response = _get_with_retries(
+                    http_client,
+                    f"{base_url.rstrip('/')}{CTGOV_STUDIES_ENDPOINT}",
+                    params=params,
+                    max_retries=max_retries,
+                    retry_initial_delay_seconds=retry_initial_delay_seconds,
+                    retry_max_delay_seconds=retry_max_delay_seconds,
+                )
+                payload = response.json()
+                if not isinstance(payload, dict):
+                    raise ValueError("ClinicalTrials.gov response was not a JSON object")
+                studies = payload.get("studies", [])
+                if not isinstance(studies, list):
+                    raise ValueError("ClinicalTrials.gov response field 'studies' was not a list")
+                request_urls.append(str(response.url))
+                for study in studies:
+                    if not isinstance(study, dict):
+                        continue
+                    nct_id = _nct_id_from_v2_record(study)
+                    if nct_id:
+                        studies_by_id[nct_id] = study
+                page_token = str(payload.get("nextPageToken", ""))
+                if not page_token:
+                    break
+                if delay_seconds:
+                    sleep(delay_seconds)
+            if delay_seconds and batch_index < len(batches) - 1:
+                sleep(delay_seconds)
+    finally:
+        if close_client:
+            http_client.close()
+
+    found_ids = tuple(nct_id for nct_id in requested_ids if nct_id in studies_by_id)
+    missing_ids = tuple(nct_id for nct_id in requested_ids if nct_id not in studies_by_id)
+    return CtgovIdCorpusDownloadResult(
+        payload={
+            "source": "clinicaltrials_gov_v2",
+            "requested_nct_ids": list(requested_ids),
+            "found_nct_ids": list(found_ids),
+            "missing_nct_ids": list(missing_ids),
+            "request_urls": request_urls,
+            "studies": [studies_by_id[nct_id] for nct_id in found_ids],
+        },
+        request_urls=tuple(request_urls),
+        requested_nct_ids=tuple(requested_ids),
+        found_nct_ids=found_ids,
+        missing_nct_ids=missing_ids,
+    )
+
+
+def _get_with_retries(
+    client: Any,
+    url: str,
+    *,
+    params: dict[str, str | int],
+    max_retries: int,
+    retry_initial_delay_seconds: float,
+    retry_max_delay_seconds: float,
+) -> Any:
+    attempts = max_retries + 1
+    for attempt in range(attempts):
+        response = client.get(url, params=params)
+        status_code = int(getattr(response, "status_code", 200))
+        if status_code not in RETRYABLE_HTTP_STATUS_CODES:
+            response.raise_for_status()
+            return response
+        if attempt == max_retries:
+            response.raise_for_status()
+            return response
+        sleep(_retry_delay_seconds(response, attempt, retry_initial_delay_seconds, retry_max_delay_seconds))
+    raise RuntimeError("ClinicalTrials.gov request retry loop exited unexpectedly")
+
+
+def _retry_delay_seconds(
+    response: Any,
+    attempt: int,
+    retry_initial_delay_seconds: float,
+    retry_max_delay_seconds: float,
+) -> float:
+    retry_after = getattr(response, "headers", {}).get("Retry-After")
+    if retry_after:
+        try:
+            return min(float(retry_after), retry_max_delay_seconds)
+        except ValueError:
+            pass
+    return min(retry_initial_delay_seconds * (2**attempt), retry_max_delay_seconds)
+
+
+def normalize_nct_ids(nct_ids: list[str]) -> tuple[str, ...]:
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for nct_id in nct_ids:
+        value = str(nct_id).strip().upper()
+        if not value or value in seen:
+            continue
+        normalized.append(value)
+        seen.add(value)
+    return tuple(normalized)
+
+
 def trials_from_v2_payload(payload: Any, source_path: Path | None = None) -> list[Trial]:
     if isinstance(payload, list):
         records = payload
@@ -179,6 +343,16 @@ def trial_from_ctgov_v2_record(record: dict[str, Any], source_path: Path | None 
             "path": str(source_path) if source_path else "",
         },
     )
+
+
+def _nct_id_from_v2_record(record: dict[str, Any]) -> str:
+    protocol = _dict(record.get("protocolSection"))
+    identification = _dict(protocol.get("identificationModule"))
+    return str(identification.get("nctId", "")).strip().upper()
+
+
+def _chunks(values: tuple[str, ...], size: int) -> list[tuple[str, ...]]:
+    return [values[index : index + size] for index in range(0, len(values), size)]
 
 
 def _dict(value: Any) -> dict[str, Any]:

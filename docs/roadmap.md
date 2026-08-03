@@ -27,6 +27,7 @@ Current TREC ingestion status:
 - API observability includes request timing headers, structured logs, and `/search` latency fields.
 - Tiny BM25 retrieval-quality regression checks run in CI over fixed synthetic fixtures.
 - TREC-style BM25 evaluation writes run files and metrics reports from normalized local benchmark files.
+- TREC qrels-linked ClinicalTrials.gov corpus building is scaffolded with raw, normalized, manifest, and report outputs.
 
 ## Milestone 2: Structured Retrieval
 

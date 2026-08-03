@@ -54,6 +54,10 @@ CI runs a tiny deterministic BM25 regression check over synthetic trial/topic/qr
 
 The BM25 benchmark command reads normalized trial JSONL, normalized TREC topic JSONL, and qrels, then writes both a six-column TREC run file and a metrics JSON report. Generated run files and reports belong under ignored `outputs/` paths.
 
+## Benchmark Corpus Build
+
+The TREC corpus builder extracts unique NCT IDs from qrels, fetches matching ClinicalTrials.gov v2 records with `query.id`, writes the raw response envelope under ignored `data/raw/`, normalizes records to trial JSONL under ignored `data/processed/`, and records manifest/report metadata. This keeps downloaded benchmark assets local while making the build process reproducible.
+
 ## Guardrails
 
 - Always distinguish benchmark snapshots from live ClinicalTrials.gov data.

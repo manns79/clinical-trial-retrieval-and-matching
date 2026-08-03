@@ -124,6 +124,22 @@ ctmatch evaluate-trec-bm25 \
 
 The run file uses six-column TREC format: topic ID, `Q0`, NCT ID, rank, score, and run name. The metrics report currently includes Precision@10, Recall@100, MRR, nDCG@10, and nDCG@100.
 
+Example TREC 2021 qrels-linked trial corpus build:
+
+```bash
+ctmatch build-trec-trial-corpus \
+  --qrels data/processed/trec/2021/qrels.jsonl \
+  --year 2021 \
+  --raw-output data/raw/clinicaltrials/trec_2021_qrels_trials_raw.json \
+  --processed-output data/processed/clinicaltrials/trec_2021_qrels_trials.jsonl \
+  --manifest-output data/manifests/trec_2021_qrels_trials.json \
+  --report-output outputs/trec_2021_qrels_trials_report.json \
+  --batch-size 100 \
+  --delay-seconds 0.2
+```
+
+The command extracts unique NCT IDs from qrels, fetches records with the ClinicalTrials.gov v2 Study IDs search parameter `query.id`, writes a raw response envelope, normalizes records to trial JSONL, writes a source manifest, and writes a corpus report. Use `--limit` for a small smoke run before fetching the full benchmark-linked corpus.
+
 ## TREC Clinical Trials
 
 The TREC Clinical Trials tracks provide patient topics and relevance judgments:

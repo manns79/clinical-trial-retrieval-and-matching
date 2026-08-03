@@ -138,6 +138,22 @@ The run file uses standard TREC format:
 topic_id Q0 nct_id rank score run_name
 ```
 
+Build a TREC 2021 benchmark trial corpus from qrels NCT IDs:
+
+```bash
+ctmatch build-trec-trial-corpus \
+  --qrels data/processed/trec/2021/qrels.jsonl \
+  --year 2021 \
+  --raw-output data/raw/clinicaltrials/trec_2021_qrels_trials_raw.json \
+  --processed-output data/processed/clinicaltrials/trec_2021_qrels_trials.jsonl \
+  --manifest-output data/manifests/trec_2021_qrels_trials.json \
+  --report-output outputs/trec_2021_qrels_trials_report.json \
+  --batch-size 100 \
+  --delay-seconds 0.2
+```
+
+For a cheap first smoke run, add `--limit 25`.
+
 Example command for a small local v2 API response:
 
 ```bash

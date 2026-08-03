@@ -9,7 +9,9 @@ from unittest.mock import patch
 from clinical_trial_matching.cli import download_ctgov_studies
 from clinical_trial_matching.ingestion.clinicaltrials import (
     CtgovDownloadResult,
+    fetch_ctgov_studies_by_ids,
     fetch_ctgov_studies,
+    normalize_nct_ids,
     parse_studies_json,
     trial_from_ctgov_v2_record,
     trial_from_flat_record,
@@ -124,6 +126,115 @@ class ClinicalTrialsIngestionTest(unittest.TestCase):
     def test_fetch_ctgov_studies_rejects_large_page_size(self) -> None:
         with self.assertRaisesRegex(ValueError, "between 1 and 1000"):
             fetch_ctgov_studies(query="asthma", page_size=1001)
+
+    def test_normalize_nct_ids_uppercases_and_deduplicates(self) -> None:
+        self.assertEqual(
+            normalize_nct_ids([" nct00000001 ", "NCT00000001", "NCT00000002"]),
+            ("NCT00000001", "NCT00000002"),
+        )
+
+    def test_fetch_ctgov_studies_by_ids_batches_query_id_requests(self) -> None:
+        class FakeResponse:
+            def __init__(self, url: str, nct_ids: list[str]) -> None:
+                self.url = url
+                self.nct_ids = nct_ids
+
+            def raise_for_status(self) -> None:
+                return None
+
+            def json(self) -> dict[str, object]:
+                return {
+                    "studies": [
+                        {
+                            "protocolSection": {
+                                "identificationModule": {
+                                    "nctId": nct_id,
+                                    "briefTitle": f"Trial {nct_id}",
+                                }
+                            }
+                        }
+                        for nct_id in self.nct_ids
+                        if nct_id != "NCT99999999"
+                    ]
+                }
+
+        class FakeClient:
+            def __init__(self) -> None:
+                self.params: list[dict[str, str | int]] = []
+
+            def get(self, url: str, params: dict[str, str | int]) -> FakeResponse:
+                assert url == "https://clinicaltrials.gov/api/v2/studies"
+                self.params.append(params)
+                nct_ids = str(params["query.id"]).split(" OR ")
+                return FakeResponse(f"{url}?query.id={params['query.id']}", nct_ids)
+
+        client = FakeClient()
+        result = fetch_ctgov_studies_by_ids(
+            nct_ids=["NCT00000001", "NCT00000002", "NCT99999999"],
+            batch_size=2,
+            client=client,
+        )
+
+        self.assertEqual(len(client.params), 2)
+        self.assertEqual(client.params[0]["query.id"], "NCT00000001 OR NCT00000002")
+        self.assertEqual(result.requested_nct_ids, ("NCT00000001", "NCT00000002", "NCT99999999"))
+        self.assertEqual(result.found_nct_ids, ("NCT00000001", "NCT00000002"))
+        self.assertEqual(result.missing_nct_ids, ("NCT99999999",))
+        self.assertEqual(len(result.payload["studies"]), 2)
+
+    def test_fetch_ctgov_studies_by_ids_retries_rate_limited_request(self) -> None:
+        class FakeResponse:
+            def __init__(self, status_code: int, nct_ids: list[str] | None = None) -> None:
+                self.status_code = status_code
+                self.url = "https://clinicaltrials.gov/api/v2/studies"
+                self.headers = {"Retry-After": "0.25"} if status_code == 429 else {}
+                self.nct_ids = nct_ids or []
+
+            def raise_for_status(self) -> None:
+                if self.status_code >= 400:
+                    raise RuntimeError(f"HTTP {self.status_code}")
+
+            def json(self) -> dict[str, object]:
+                return {
+                    "studies": [
+                        {
+                            "protocolSection": {
+                                "identificationModule": {
+                                    "nctId": nct_id,
+                                    "briefTitle": f"Trial {nct_id}",
+                                }
+                            }
+                        }
+                        for nct_id in self.nct_ids
+                    ]
+                }
+
+        class FakeClient:
+            def __init__(self) -> None:
+                self.calls = 0
+
+            def get(self, url: str, params: dict[str, str | int]) -> FakeResponse:
+                self.calls += 1
+                nct_ids = str(params["query.id"]).split(" OR ")
+                if self.calls == 1:
+                    return FakeResponse(429)
+                return FakeResponse(200, nct_ids)
+
+        client = FakeClient()
+        with patch("clinical_trial_matching.ingestion.clinicaltrials.sleep") as sleep_mock:
+            result = fetch_ctgov_studies_by_ids(
+                nct_ids=["NCT00000001"],
+                batch_size=1,
+                client=client,
+                max_retries=1,
+                retry_initial_delay_seconds=0.1,
+                retry_max_delay_seconds=1.0,
+            )
+
+        self.assertEqual(client.calls, 2)
+        sleep_mock.assert_called_once_with(0.25)
+        self.assertEqual(result.found_nct_ids, ("NCT00000001",))
+        self.assertEqual(result.missing_nct_ids, ())
 
     def test_download_ctgov_studies_writes_raw_processed_and_manifest(self) -> None:
         payload = {

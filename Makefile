@@ -1,7 +1,7 @@
 PYTHON ?= python3
 PYTHONPATH ?= src
 
-.PHONY: install install-dev install-ui test compile ingest-sample ingest-ctgov-sample report-ctgov-sample search-ctgov-sample download-ctgov-small evaluate-baseline evaluate-trec-bm25-sample check-retrieval-regression ingest-trec-sample validate-trec-sample write-manifest-sample api ui docker-up docker-down docker-smoke clean
+.PHONY: install install-dev install-ui test compile ingest-sample ingest-ctgov-sample report-ctgov-sample search-ctgov-sample download-ctgov-small build-trec-corpus-smoke evaluate-baseline evaluate-trec-bm25-sample check-retrieval-regression ingest-trec-sample validate-trec-sample write-manifest-sample api ui docker-up docker-down docker-smoke clean
 
 install:
 	$(PYTHON) -m pip install -e .
@@ -48,6 +48,16 @@ download-ctgov-small:
 		--raw-output data/raw/clinicaltrials/asthma_recruiting_25.json \
 		--manifest-output data/manifests/clinicaltrials_asthma_recruiting_25.json \
 		--processed-output data/processed/clinicaltrials/asthma_recruiting_25.jsonl
+
+build-trec-corpus-smoke:
+	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m clinical_trial_matching.cli build-trec-trial-corpus \
+		--qrels data/fixtures/qrels.sample.tsv \
+		--year 2021 \
+		--limit 2 \
+		--raw-output data/raw/clinicaltrials/trec_2021_smoke_raw.json \
+		--processed-output data/processed/clinicaltrials/trec_2021_smoke_trials.jsonl \
+		--manifest-output data/manifests/trec_2021_smoke_trials.json \
+		--report-output outputs/trec_2021_smoke_corpus_report.json
 
 evaluate-baseline:
 	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m clinical_trial_matching.cli evaluate-baseline \
