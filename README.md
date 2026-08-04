@@ -129,8 +129,13 @@ ctmatch evaluate-trec-bm25 \
   --qrels data/processed/trec/2021/qrels.jsonl \
   --run-output outputs/trec_2021_bm25.run \
   --metrics-output outputs/trec_2021_bm25_metrics.json \
+  --diagnostics-output outputs/trec_2021_bm25_diagnostics.json \
   --run-name bm25_2021
 ```
+
+The metrics report includes separate `excluded_or_eligible` and `eligible_only` views so
+topical retrieval quality is not confused with true eligibility matching. The diagnostics
+file records per-topic recall, first eligible rank, and a compact list of weak topics.
 
 The run file uses standard TREC format:
 

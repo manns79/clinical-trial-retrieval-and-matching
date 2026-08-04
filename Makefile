@@ -73,6 +73,7 @@ evaluate-trec-bm25-sample:
 		--qrels data/fixtures/qrels.sample.tsv \
 		--run-output outputs/sample_bm25.trec \
 		--metrics-output outputs/sample_bm25_trec_metrics.json \
+		--diagnostics-output outputs/sample_bm25_trec_diagnostics.json \
 		--run-name bm25_fixture
 
 check-retrieval-regression:

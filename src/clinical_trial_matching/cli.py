@@ -9,6 +9,7 @@ from clinical_trial_matching.evaluation.regression import (
     run_bm25_regression_check,
 )
 from clinical_trial_matching.evaluation.trec import (
+    bm25_trec_topic_diagnostics,
     bm25_trec_evaluation_report,
     build_bm25_trec_run,
     write_trec_run,
@@ -104,6 +105,7 @@ def main() -> None:
     trec_bm25.add_argument("--qrels", type=Path, required=True)
     trec_bm25.add_argument("--run-output", type=Path, required=True)
     trec_bm25.add_argument("--metrics-output", type=Path, required=True)
+    trec_bm25.add_argument("--diagnostics-output", type=Path)
     trec_bm25.add_argument("--run-name", default="bm25")
     trec_bm25.add_argument("--top-k", type=int, default=100)
 
@@ -219,6 +221,7 @@ def main() -> None:
             qrels_path=args.qrels,
             run_output_path=args.run_output,
             metrics_output_path=args.metrics_output,
+            diagnostics_output_path=args.diagnostics_output,
             run_name=args.run_name,
             top_k=args.top_k,
         )
@@ -432,6 +435,7 @@ def evaluate_trec_bm25(
     qrels_path: Path,
     run_output_path: Path,
     metrics_output_path: Path,
+    diagnostics_output_path: Path | None,
     run_name: str,
     top_k: int,
 ) -> None:
@@ -449,8 +453,19 @@ def evaluate_trec_bm25(
         trials_count=len(trials),
     )
     write_json(metrics_output_path, report)
+    if diagnostics_output_path:
+        diagnostics = bm25_trec_topic_diagnostics(
+            rows=rows,
+            qrels=qrels,
+            topics=topics,
+            run_name=run_name,
+            top_k=top_k,
+        )
+        write_json(diagnostics_output_path, diagnostics)
     print(f"Wrote TREC run file to {run_output_path}")
     print(f"Wrote TREC BM25 metrics report to {metrics_output_path}")
+    if diagnostics_output_path:
+        print(f"Wrote TREC BM25 topic diagnostics to {diagnostics_output_path}")
 
 
 def check_retrieval_regression(

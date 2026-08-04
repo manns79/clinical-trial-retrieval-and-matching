@@ -68,3 +68,24 @@ def summarize_run(run: Run, qrels: Qrels) -> dict[str, float]:
         "ndcg_at_10": ndcg_at_k(run, qrels, 10),
         "ndcg_at_100": ndcg_at_k(run, qrels, 100),
     }
+
+
+def summarize_binary_run(run: Run, qrels: Qrels, min_relevance: int) -> dict[str, float]:
+    binary_qrels = _binary_qrels(qrels, min_relevance)
+    return {
+        "precision_at_10": precision_at_k(run, qrels, 10, min_relevance=min_relevance),
+        "recall_at_100": recall_at_k(run, qrels, 100, min_relevance=min_relevance),
+        "mrr": mrr(run, qrels, min_relevance=min_relevance),
+        "ndcg_at_10": ndcg_at_k(run, binary_qrels, 10),
+        "ndcg_at_100": ndcg_at_k(run, binary_qrels, 100),
+    }
+
+
+def _binary_qrels(qrels: Qrels, min_relevance: int) -> dict[str, dict[str, int]]:
+    return {
+        topic_id: {
+            nct_id: 1 if relevance >= min_relevance else 0
+            for nct_id, relevance in judged.items()
+        }
+        for topic_id, judged in qrels.items()
+    }
