@@ -37,7 +37,7 @@ curl -fsS \
   -X POST "http://localhost:$HOST_PORT/search" \
   -H "Content-Type: application/json" \
   -d '{"query":"adult persistent asthma inhaled corticosteroid","top_k":1}' \
-  | python -c "import json, sys; payload=json.load(sys.stdin); assert payload['retriever']=='bm25'; assert payload['results']; assert payload['results'][0]['nct_id']=='NCT99991001'"
+  | python -c "import json, sys; payload=json.load(sys.stdin); assert payload['retriever']=='fielded-bm25'; assert payload['results']; assert payload['results'][0]['nct_id']=='NCT99991001'"
 
 curl -fsS "http://localhost:$HOST_PORT/trial/NCT99991001" \
   | python -c "import json, sys; payload=json.load(sys.stdin); assert payload['nct_id']=='NCT99991001'; assert payload['title']=='Synthetic Asthma Controller Therapy Study'"
