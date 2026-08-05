@@ -10,6 +10,9 @@
         "statusModule": {
           "overallStatus": "RECRUITING"
         },
+        "descriptionModule": {
+          "briefSummary": "Synthetic summary for adults with persistent asthma, wheezing, and controller therapy."
+        },
         "conditionsModule": {
           "conditions": [
             "Asthma"
@@ -59,6 +62,9 @@
         },
         "statusModule": {
           "overallStatus": "COMPLETED"
+        },
+        "descriptionModule": {
+          "briefSummary": "Synthetic summary for adults with type 2 diabetes and lifestyle counseling."
         },
         "conditionsModule": {
           "conditions": [

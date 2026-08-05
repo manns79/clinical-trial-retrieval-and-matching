@@ -33,6 +33,7 @@ class TrecBm25EvaluationTest(unittest.TestCase):
             topics=topics,
             run_name="bm25_fixture",
             top_k=2,
+            retriever_name="fielded-bm25",
         )
 
         self.assertEqual(rows[0].topic_id, "1")
@@ -49,7 +50,12 @@ class TrecBm25EvaluationTest(unittest.TestCase):
             topic_from_json_record(row) for row in read_jsonl(Path("data/fixtures/topics.sample.jsonl"))
         ]
         qrels = parse_qrels(Path("data/fixtures/qrels.sample.tsv"))
-        rows = build_bm25_trec_run(trials=trials, topics=topics, run_name="bm25_fixture")
+        rows = build_bm25_trec_run(
+            trials=trials,
+            topics=topics,
+            run_name="bm25_fixture",
+            retriever_name="fielded-bm25",
+        )
 
         metrics = evaluate_trec_run(rows, qrels)
         binary_views = evaluate_trec_binary_views(rows, qrels)
@@ -60,6 +66,8 @@ class TrecBm25EvaluationTest(unittest.TestCase):
             top_k=100,
             topics_count=len(topics),
             trials_count=len(trials),
+            retriever_name="fielded-bm25",
+            retriever_parameters={"field_weights": {"conditions": 3.0}},
         )
 
         self.assertEqual(metrics["recall_at_100"], 1.0)
@@ -67,6 +75,8 @@ class TrecBm25EvaluationTest(unittest.TestCase):
         self.assertEqual(binary_views["excluded_or_eligible"]["recall_at_100"], 1.0)
         self.assertEqual(binary_views["eligible_only"]["recall_at_100"], 1.0)
         self.assertEqual(report["run_name"], "bm25_fixture")
+        self.assertEqual(report["retriever"], "fielded-bm25")
+        self.assertEqual(report["retriever_parameters"]["field_weights"]["conditions"], 3.0)
         self.assertEqual(report["metrics"]["excluded_or_eligible"]["ndcg_at_10"], 1.0)
         self.assertEqual(report["metrics"]["eligible_only"]["ndcg_at_10"], 1.0)
         self.assertEqual(report["graded_metrics"]["ndcg_at_10"], 1.0)
@@ -89,11 +99,15 @@ class TrecBm25EvaluationTest(unittest.TestCase):
             topics=topics,
             run_name="bm25_fixture",
             top_k=1,
+            retriever_name="fielded-bm25",
+            retriever_parameters={"field_weights": {"conditions": 3.0}},
         )
 
         topic_1 = diagnostics["topics"][0]
         topic_2 = diagnostics["topics"][1]
         self.assertTrue(topic_1["weak_retrieval"])
+        self.assertEqual(diagnostics["retriever"], "fielded-bm25")
+        self.assertEqual(diagnostics["retriever_parameters"]["field_weights"]["conditions"], 3.0)
         self.assertEqual(topic_1["first_eligible_rank"], None)
         self.assertIn("no_eligible_result_in_top_k", topic_1["weak_retrieval_reasons"])
         self.assertFalse(topic_2["weak_retrieval"])
@@ -111,6 +125,7 @@ class TrecBm25EvaluationTest(unittest.TestCase):
             topics=topics,
             run_name="bm25_fixture",
             top_k=1,
+            retriever_name="fielded-bm25",
         )
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -135,13 +150,14 @@ class TrecBm25EvaluationTest(unittest.TestCase):
                 diagnostics_output_path=Path(tmpdir) / "diagnostics.json",
                 run_name="bm25_fixture",
                 top_k=100,
+                retriever_name="fielded-bm25",
             )
             run_lines = run_output.read_text(encoding="utf-8").splitlines()
             metrics = read_json(metrics_output)
             diagnostics = read_json(Path(tmpdir) / "diagnostics.json")
 
         self.assertGreater(len(run_lines), 0)
-        self.assertEqual(metrics["retriever"], "bm25")
+        self.assertEqual(metrics["retriever"], "fielded-bm25")
         self.assertEqual(metrics["metrics"]["excluded_or_eligible"]["ndcg_at_10"], 1.0)
         self.assertEqual(metrics["metrics"]["eligible_only"]["ndcg_at_10"], 1.0)
         self.assertEqual(metrics["graded_metrics"]["ndcg_at_10"], 1.0)

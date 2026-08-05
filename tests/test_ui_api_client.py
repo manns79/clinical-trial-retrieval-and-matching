@@ -48,7 +48,12 @@ class UiApiClientTest(unittest.TestCase):
                 (
                     "POST",
                     "http://localhost:8000/search",
-                    {"query": "asthma", "top_k": 5, "snippet_chars": 120},
+                    {
+                        "query": "asthma",
+                        "top_k": 5,
+                        "snippet_chars": 120,
+                        "retriever": "fielded-bm25",
+                    },
                 )
             ],
         )

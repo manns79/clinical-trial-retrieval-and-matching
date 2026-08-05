@@ -70,7 +70,7 @@ class ApiSearchTest(unittest.TestCase):
             )
 
         payload = response.model_dump()
-        self.assertEqual(payload["retriever"], "bm25")
+        self.assertEqual(payload["retriever"], "fielded-bm25")
         self.assertEqual(payload["corpus"], {"trials": 2, "unique_nct_ids": 2})
         self.assertEqual(payload["results"][0]["nct_id"], "NCT1")
         self.assertEqual(payload["results"][0]["rank"], 1)
@@ -118,6 +118,7 @@ class ApiSearchTest(unittest.TestCase):
                         Trial(
                             nct_id="NCT1",
                             title="Asthma inhaler study",
+                            brief_summary="Brief asthma trial summary.",
                             status="RECRUITING",
                             conditions=("Asthma",),
                             interventions=("Inhaled corticosteroid",),
@@ -141,6 +142,7 @@ class ApiSearchTest(unittest.TestCase):
         payload = response.model_dump()
         self.assertEqual(payload["nct_id"], "NCT1")
         self.assertEqual(payload["title"], "Asthma inhaler study")
+        self.assertEqual(payload["brief_summary"], "Brief asthma trial summary.")
         self.assertEqual(payload["conditions"], ["Asthma"])
         self.assertEqual(payload["interventions"], ["Inhaled corticosteroid"])
         self.assertEqual(payload["minimum_age"], "18 Years")

@@ -4,7 +4,7 @@ import os
 import logging
 from functools import lru_cache
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -32,6 +32,7 @@ class SearchRequest(BaseModel):
     query: str = Field(min_length=1)
     top_k: int = Field(default=10, ge=1, le=100)
     snippet_chars: int = Field(default=240, ge=1, le=1000)
+    retriever: Literal["bm25", "fielded-bm25"] = "fielded-bm25"
 
 
 class SearchResponse(BaseModel):
@@ -46,6 +47,7 @@ class SearchResponse(BaseModel):
 class TrialResponse(BaseModel):
     nct_id: str
     title: str
+    brief_summary: str
     status: str
     conditions: list[str]
     interventions: list[str]
@@ -102,6 +104,7 @@ def search(request: SearchRequest) -> SearchResponse:
         query=request.query,
         top_k=request.top_k,
         snippet_chars=request.snippet_chars,
+        retriever_name=request.retriever,
     )
     retrieval_ms = elapsed_ms(retrieval_start_ms)
     payload["latency_ms"] = {
@@ -115,6 +118,7 @@ def search(request: SearchRequest) -> SearchResponse:
         fields={
             "query_length": len(request.query),
             "top_k": request.top_k,
+            "retriever": request.retriever,
             "corpus_trials": payload["corpus"]["trials"],
             "result_count": len(payload["results"]),
             "latency_ms": payload["latency_ms"],

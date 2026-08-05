@@ -12,6 +12,7 @@ class BM25SearchReportTest(unittest.TestCase):
             Trial(
                 nct_id="NCT1",
                 title="Asthma inhaler study",
+                brief_summary="Brief summary for asthma controller therapy.",
                 status="RECRUITING",
                 conditions=("Asthma",),
                 interventions=("Inhaled corticosteroid",),
@@ -30,10 +31,12 @@ class BM25SearchReportTest(unittest.TestCase):
         result = payload["results"][0]
 
         self.assertEqual(payload["query"], "persistent asthma inhaler")
+        self.assertEqual(payload["retriever"], "fielded-bm25")
         self.assertEqual(payload["corpus"], {"trials": 2, "unique_nct_ids": 2})
         self.assertEqual(result["nct_id"], "NCT1")
         self.assertEqual(result["rank"], 1)
         self.assertEqual(result["status"], "RECRUITING")
+        self.assertIn("controller therapy", result["brief_summary"])
         self.assertEqual(result["conditions"], ["Asthma"])
         self.assertIn("asthma", result["matched_terms"])
         self.assertIn("persistent asthma", result["snippet"])

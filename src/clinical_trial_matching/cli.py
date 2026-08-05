@@ -9,6 +9,7 @@ from clinical_trial_matching.evaluation.regression import (
     run_bm25_regression_check,
 )
 from clinical_trial_matching.evaluation.trec import (
+    bm25_retriever_parameters,
     bm25_trec_topic_diagnostics,
     bm25_trec_evaluation_report,
     build_bm25_trec_run,
@@ -108,6 +109,13 @@ def main() -> None:
     trec_bm25.add_argument("--diagnostics-output", type=Path)
     trec_bm25.add_argument("--run-name", default="bm25")
     trec_bm25.add_argument("--top-k", type=int, default=100)
+    trec_bm25.add_argument("--retriever", choices=["bm25", "fielded-bm25"], default="fielded-bm25")
+    trec_bm25.add_argument(
+        "--field-weight",
+        action="append",
+        default=[],
+        help="Optional field=weight override for fielded-bm25. May be provided multiple times.",
+    )
 
     regression = subparsers.add_parser(
         "check-retrieval-regression",
@@ -138,6 +146,13 @@ def main() -> None:
     trial_search.add_argument("--output", type=Path)
     trial_search.add_argument("--top-k", type=int, default=10)
     trial_search.add_argument("--snippet-chars", type=int, default=240)
+    trial_search.add_argument("--retriever", choices=["bm25", "fielded-bm25"], default="fielded-bm25")
+    trial_search.add_argument(
+        "--field-weight",
+        action="append",
+        default=[],
+        help="Optional field=weight override for fielded-bm25. May be provided multiple times.",
+    )
 
     trec_topics = subparsers.add_parser(
         "ingest-trec-topics", help="Normalize TREC Clinical Trials topics XML to JSONL."
@@ -224,6 +239,8 @@ def main() -> None:
             diagnostics_output_path=args.diagnostics_output,
             run_name=args.run_name,
             top_k=args.top_k,
+            retriever_name=args.retriever,
+            field_weights=parse_field_weights(args.field_weight),
         )
     elif args.command == "check-retrieval-regression":
         check_retrieval_regression(
@@ -247,6 +264,8 @@ def main() -> None:
             args.output,
             args.top_k,
             args.snippet_chars,
+            args.retriever,
+            parse_field_weights(args.field_weight),
         )
     elif args.command == "ingest-trec-topics":
         ingest_trec_topics(args.year, args.input, args.output)
@@ -438,12 +457,25 @@ def evaluate_trec_bm25(
     diagnostics_output_path: Path | None,
     run_name: str,
     top_k: int,
+    retriever_name: str = "fielded-bm25",
+    field_weights: dict[str, float] | None = None,
 ) -> None:
     trials = [trial_from_flat_record(row) for row in read_jsonl(trials_path)]
     topics = [topic_from_json_record(row) for row in read_jsonl(topics_path)]
     qrels = read_qrels_records(qrels_path)
-    rows = build_bm25_trec_run(trials=trials, topics=topics, run_name=run_name, top_k=top_k)
+    rows = build_bm25_trec_run(
+        trials=trials,
+        topics=topics,
+        run_name=run_name,
+        top_k=top_k,
+        retriever_name=retriever_name,
+        field_weights=field_weights,
+    )
     write_trec_run(run_output_path, rows)
+    retriever_parameters = bm25_retriever_parameters(
+        retriever_name,
+        field_weights=field_weights,
+    )
     report = bm25_trec_evaluation_report(
         rows=rows,
         qrels=qrels,
@@ -451,6 +483,8 @@ def evaluate_trec_bm25(
         top_k=top_k,
         topics_count=len(topics),
         trials_count=len(trials),
+        retriever_name=retriever_name,
+        retriever_parameters=retriever_parameters,
     )
     write_json(metrics_output_path, report)
     if diagnostics_output_path:
@@ -460,6 +494,8 @@ def evaluate_trec_bm25(
             topics=topics,
             run_name=run_name,
             top_k=top_k,
+            retriever_name=retriever_name,
+            retriever_parameters=retriever_parameters,
         )
         write_json(diagnostics_output_path, diagnostics)
     print(f"Wrote TREC run file to {run_output_path}")
@@ -523,6 +559,8 @@ def search_trials_bm25(
     output_path: Path | None,
     top_k: int,
     snippet_chars: int,
+    retriever_name: str,
+    field_weights: dict[str, float],
 ) -> None:
     if top_k < 1:
         raise ValueError("Top-K must be at least 1")
@@ -534,6 +572,8 @@ def search_trials_bm25(
         query=query,
         top_k=top_k,
         snippet_chars=snippet_chars,
+        retriever_name=retriever_name,
+        field_weights=field_weights,
     )
     if output_path:
         write_json(output_path, payload)
@@ -631,6 +671,22 @@ def parse_metadata_items(items: list[str]) -> dict[str, str]:
             raise ValueError(f"Invalid metadata item {item!r}; key cannot be empty")
         metadata[key] = value.strip()
     return metadata
+
+
+def parse_field_weights(items: list[str]) -> dict[str, float]:
+    weights: dict[str, float] = {}
+    for item in items:
+        if "=" not in item:
+            raise ValueError(f"Invalid field weight {item!r}; expected field=weight")
+        field, value = item.split("=", 1)
+        field = field.strip()
+        if not field:
+            raise ValueError(f"Invalid field weight {item!r}; field cannot be empty")
+        try:
+            weights[field] = float(value)
+        except ValueError as exc:
+            raise ValueError(f"Invalid weight for field {field!r}: {value!r}") from exc
+    return weights
 
 
 def slugify(value: str) -> str:

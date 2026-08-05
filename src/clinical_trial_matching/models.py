@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 class Trial:
     nct_id: str
     title: str
+    brief_summary: str = ""
     status: str = ""
     conditions: tuple[str, ...] = ()
     interventions: tuple[str, ...] = ()
@@ -23,6 +24,7 @@ class Trial:
     def searchable_text(self) -> str:
         parts = [
             self.title,
+            self.brief_summary,
             self.status,
             " ".join(self.conditions),
             " ".join(self.interventions),

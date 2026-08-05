@@ -8,7 +8,7 @@ from typing import Any
 from clinical_trial_matching.evaluation.metrics import summarize_binary_run, summarize_run
 from clinical_trial_matching.ingestion.trec import qrels_to_mapping
 from clinical_trial_matching.models import Qrel, Topic, Trial
-from clinical_trial_matching.retrieval.bm25 import BM25Retriever
+from clinical_trial_matching.retrieval.bm25 import build_bm25_retriever, normalized_field_weights
 
 
 @dataclass(frozen=True)
@@ -29,13 +29,19 @@ def build_bm25_trec_run(
     topics: Iterable[Topic],
     run_name: str,
     top_k: int = 100,
+    retriever_name: str = "bm25",
+    field_weights: dict[str, float] | None = None,
 ) -> list[TrecRunRow]:
     if top_k < 1:
         raise ValueError("Top-K must be at least 1")
     if not run_name.strip():
         raise ValueError("Run name cannot be empty")
 
-    retriever = BM25Retriever(trials)
+    retriever = build_bm25_retriever(
+        trials,
+        retriever_name=retriever_name,
+        field_weights=field_weights,
+    )
     rows: list[TrecRunRow] = []
     for topic in topics:
         for result in retriever.search(topic.text, top_k=top_k):
@@ -79,11 +85,14 @@ def bm25_trec_evaluation_report(
     top_k: int,
     topics_count: int,
     trials_count: int,
+    retriever_name: str = "bm25",
+    retriever_parameters: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     topic_ids_with_results = {row.topic_id for row in rows}
     return {
         "run_name": run_name,
-        "retriever": "bm25",
+        "retriever": retriever_name,
+        "retriever_parameters": retriever_parameters or {},
         "top_k": top_k,
         "metrics": evaluate_trec_binary_views(rows, qrels),
         "graded_metrics": evaluate_trec_run(rows, qrels),
@@ -103,6 +112,8 @@ def bm25_trec_topic_diagnostics(
     run_name: str,
     top_k: int,
     weak_recall_threshold: float = 0.05,
+    retriever_name: str = "bm25",
+    retriever_parameters: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     run = _rows_to_run(rows)
     qrels_mapping = qrels_to_mapping(qrels)
@@ -132,7 +143,8 @@ def bm25_trec_topic_diagnostics(
     )
     return {
         "run_name": run_name,
-        "retriever": "bm25",
+        "retriever": retriever_name,
+        "retriever_parameters": retriever_parameters or {},
         "top_k": top_k,
         "weak_retrieval_policy": {
             "eligible_recall_at_k_below": weak_recall_threshold,
@@ -232,3 +244,13 @@ def _weak_topic_sort_key(topic: dict[str, Any]) -> tuple[float, int, str]:
         first_rank if first_rank is not None else 1_000_000,
         topic["topic_id"],
     )
+
+
+def bm25_retriever_parameters(
+    retriever_name: str,
+    *,
+    field_weights: dict[str, float] | None = None,
+) -> dict[str, Any]:
+    if retriever_name == "fielded-bm25":
+        return {"field_weights": normalized_field_weights(field_weights)}
+    return {}

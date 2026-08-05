@@ -19,9 +19,15 @@ def search_trials_api(
     query: str,
     top_k: int,
     snippet_chars: int = 240,
+    retriever: str = "fielded-bm25",
     client: Any = None,
 ) -> dict[str, Any]:
-    payload = {"query": query, "top_k": top_k, "snippet_chars": snippet_chars}
+    payload = {
+        "query": query,
+        "top_k": top_k,
+        "snippet_chars": snippet_chars,
+        "retriever": retriever,
+    }
     response = _post(
         api_base_url=api_base_url,
         path="/search",

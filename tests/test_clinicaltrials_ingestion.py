@@ -30,6 +30,7 @@ class ClinicalTrialsIngestionTest(unittest.TestCase):
         self.assertEqual(len(trials), 2)
         self.assertEqual(trials[0].nct_id, "NCT99991001")
         self.assertEqual(trials[0].title, "Synthetic Asthma Controller Therapy Study")
+        self.assertIn("persistent asthma", trials[0].brief_summary)
         self.assertEqual(trials[0].status, "RECRUITING")
         self.assertEqual(trials[0].conditions, ("Asthma",))
         self.assertEqual(
@@ -78,6 +79,7 @@ class ClinicalTrialsIngestionTest(unittest.TestCase):
         trial = parse_studies_json(FIXTURES / "ctgov_v2_studies.sample.json")[0]
 
         self.assertIn("persistent asthma", trial.searchable_text)
+        self.assertIn("Synthetic summary", trial.searchable_text)
         self.assertIn("Inhaled corticosteroid", trial.searchable_text)
         self.assertIn("18 Years", trial.searchable_text)
         self.assertIn("PHASE2", trial.searchable_text)

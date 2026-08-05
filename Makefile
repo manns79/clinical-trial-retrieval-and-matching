@@ -38,6 +38,7 @@ search-ctgov-sample:
 		--trials data/processed/clinicaltrials/studies.sample.jsonl \
 		--query "adult persistent asthma inhaled corticosteroid" \
 		--top-k 5 \
+		--retriever fielded-bm25 \
 		--output outputs/clinicaltrials_sample_bm25_search.json
 
 download-ctgov-small:
@@ -74,6 +75,7 @@ evaluate-trec-bm25-sample:
 		--run-output outputs/sample_bm25.trec \
 		--metrics-output outputs/sample_bm25_trec_metrics.json \
 		--diagnostics-output outputs/sample_bm25_trec_diagnostics.json \
+		--retriever fielded-bm25 \
 		--run-name bm25_fixture
 
 check-retrieval-regression:

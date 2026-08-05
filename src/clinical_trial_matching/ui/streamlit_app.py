@@ -39,16 +39,18 @@ def main() -> None:
         height=120,
     )
 
-    col_top_k, col_button = st.columns([1, 3])
+    col_top_k, col_retriever, col_button = st.columns([1, 2, 3])
     with col_top_k:
         top_k = st.slider("Results", min_value=1, max_value=25, value=10)
+    with col_retriever:
+        retriever = st.selectbox("Retriever", options=["fielded-bm25", "bm25"], index=0)
     with col_button:
         st.write("")
         st.write("")
         submitted = st.button("Search", type="primary", use_container_width=False)
 
     if submitted:
-        run_search(api_base_url=api_base_url, query=query, top_k=top_k)
+        run_search(api_base_url=api_base_url, query=query, top_k=top_k, retriever=retriever)
 
     if "last_search" in st.session_state:
         render_search_results(st.session_state["last_search"])
@@ -85,12 +87,17 @@ def render_health(api_base_url: str) -> None:
     )
 
 
-def run_search(*, api_base_url: str, query: str, top_k: int) -> None:
+def run_search(*, api_base_url: str, query: str, top_k: int, retriever: str) -> None:
     if not query.strip():
         st.error("Enter a patient summary before searching.")
         return
     try:
-        payload = search_trials_api(api_base_url=api_base_url, query=query, top_k=top_k)
+        payload = search_trials_api(
+            api_base_url=api_base_url,
+            query=query,
+            top_k=top_k,
+            retriever=retriever,
+        )
     except ApiError as exc:
         st.error(str(exc))
         return
@@ -107,7 +114,8 @@ def render_search_results(payload: dict[str, Any]) -> None:
     st.subheader("Results")
     st.caption(
         f"{len(results)} shown from {corpus.get('trials', 0)} trials "
-        f"({corpus.get('unique_nct_ids', 0)} unique NCT IDs)"
+        f"({corpus.get('unique_nct_ids', 0)} unique NCT IDs) | "
+        f"Retriever: {payload.get('retriever', 'unknown')}"
     )
 
     if not results:
@@ -169,6 +177,8 @@ def render_trial_detail(api_base_url: str, nct_id: str) -> None:
     st.write(", ".join(trial.get("conditions", [])) or "None listed")
     st.markdown("**Interventions**")
     st.write(", ".join(trial.get("interventions", [])) or "None listed")
+    st.markdown("**Brief Summary**")
+    st.write(trial.get("brief_summary", "") or "None listed")
     st.markdown("**Locations**")
     locations = trial.get("locations", [])
     st.write("\n".join(f"- {location}" for location in locations) or "None listed")

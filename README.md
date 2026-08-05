@@ -130,12 +130,27 @@ ctmatch evaluate-trec-bm25 \
   --run-output outputs/trec_2021_bm25.run \
   --metrics-output outputs/trec_2021_bm25_metrics.json \
   --diagnostics-output outputs/trec_2021_bm25_diagnostics.json \
+  --retriever fielded-bm25 \
   --run-name bm25_2021
 ```
+
+Use `--retriever bm25` for the older single-text BM25 baseline. The field-aware
+baseline keeps an `all_text` BM25 backbone and adds separate boosts for title,
+brief summary, conditions, interventions, eligibility criteria, demographics,
+status, and locations via repeated `--field-weight field=value` options.
 
 The metrics report includes separate `excluded_or_eligible` and `eligible_only` views so
 topical retrieval quality is not confused with true eligibility matching. The diagnostics
 file records per-topic recall, first eligible rank, and a compact list of weak topics.
+
+If you built a ClinicalTrials.gov corpus before `brief_summary` was added, re-normalize
+from the ignored raw JSON before benchmarking so summary boosts are populated:
+
+```bash
+ctmatch ingest-ctgov-studies \
+  --input data/raw/clinicaltrials/trec_2021_qrels_trials_raw.json \
+  --output data/processed/clinicaltrials/trec_2021_qrels_trials.jsonl
+```
 
 The run file uses standard TREC format:
 

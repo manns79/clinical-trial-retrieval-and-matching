@@ -45,6 +45,7 @@ def trial_from_flat_record(record: dict[str, Any]) -> Trial:
     return Trial(
         nct_id=str(record["nct_id"]),
         title=str(record.get("title", "")),
+        brief_summary=str(record.get("brief_summary", "")),
         status=str(record.get("status", "")),
         conditions=_as_tuple(record.get("conditions")),
         interventions=_as_tuple(record.get("interventions")),
@@ -63,6 +64,7 @@ def trial_to_flat_record(trial: Trial) -> dict[str, Any]:
     return {
         "nct_id": trial.nct_id,
         "title": trial.title,
+        "brief_summary": trial.brief_summary,
         "status": trial.status,
         "conditions": list(trial.conditions),
         "interventions": list(trial.interventions),
@@ -314,6 +316,7 @@ def trial_from_ctgov_v2_record(record: dict[str, Any], source_path: Path | None 
     protocol = _dict(record.get("protocolSection"))
     identification = _dict(protocol.get("identificationModule"))
     status_module = _dict(protocol.get("statusModule"))
+    description = _dict(protocol.get("descriptionModule"))
     conditions_module = _dict(protocol.get("conditionsModule"))
     design = _dict(protocol.get("designModule"))
     interventions_module = _dict(protocol.get("armsInterventionsModule"))
@@ -327,6 +330,7 @@ def trial_from_ctgov_v2_record(record: dict[str, Any], source_path: Path | None 
     return Trial(
         nct_id=nct_id,
         title=_first_text(identification.get("briefTitle"), identification.get("officialTitle")),
+        brief_summary=str(description.get("briefSummary", "")),
         status=str(status_module.get("overallStatus", "")),
         conditions=_as_tuple(conditions_module.get("conditions")),
         interventions=_intervention_names(interventions_module.get("interventions")),
