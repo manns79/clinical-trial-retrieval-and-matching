@@ -1,7 +1,7 @@
 PYTHON ?= python3
 PYTHONPATH ?= src
 
-.PHONY: install install-dev install-ui test compile ingest-sample ingest-ctgov-sample report-ctgov-sample search-ctgov-sample download-ctgov-small build-trec-corpus-smoke evaluate-baseline evaluate-trec-bm25-sample check-retrieval-regression ingest-trec-sample validate-trec-sample write-manifest-sample api ui docker-up docker-down docker-smoke clean
+.PHONY: install install-dev install-ui test compile ingest-sample ingest-ctgov-sample report-ctgov-sample search-ctgov-sample download-ctgov-small build-trec-corpus-smoke build-bm25-index-sample evaluate-baseline evaluate-trec-bm25-sample check-retrieval-regression ingest-trec-sample validate-trec-sample write-manifest-sample api ui docker-up docker-down docker-smoke clean
 
 install:
 	$(PYTHON) -m pip install -e .
@@ -39,6 +39,7 @@ search-ctgov-sample:
 		--query "adult persistent asthma inhaled corticosteroid" \
 		--top-k 5 \
 		--retriever fielded-bm25 \
+		--index-path data/indexes/clinicaltrials_sample_fielded_bm25.pkl \
 		--output outputs/clinicaltrials_sample_bm25_search.json
 
 download-ctgov-small:
@@ -60,6 +61,12 @@ build-trec-corpus-smoke:
 		--manifest-output data/manifests/trec_2021_smoke_trials.json \
 		--report-output outputs/trec_2021_smoke_corpus_report.json
 
+build-bm25-index-sample:
+	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m clinical_trial_matching.cli build-bm25-index \
+		--trials data/fixtures/trials.sample.jsonl \
+		--output data/indexes/sample_fielded_bm25.pkl \
+		--retriever fielded-bm25
+
 evaluate-baseline:
 	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m clinical_trial_matching.cli evaluate-baseline \
 		--trials data/fixtures/trials.sample.jsonl \
@@ -75,6 +82,7 @@ evaluate-trec-bm25-sample:
 		--run-output outputs/sample_bm25.trec \
 		--metrics-output outputs/sample_bm25_trec_metrics.json \
 		--diagnostics-output outputs/sample_bm25_trec_diagnostics.json \
+		--index-path data/indexes/sample_fielded_bm25.pkl \
 		--retriever fielded-bm25 \
 		--run-name bm25_fixture
 

@@ -105,12 +105,21 @@ ctmatch report-trial-corpus \
 Search a normalized trial corpus with BM25:
 
 ```bash
+ctmatch build-bm25-index \
+  --trials data/processed/clinicaltrials/asthma_recruiting_25.jsonl \
+  --output data/indexes/asthma_recruiting_25_fielded_bm25.pkl \
+  --retriever fielded-bm25
+
 ctmatch search-trials-bm25 \
   --trials data/processed/clinicaltrials/asthma_recruiting_25.jsonl \
   --query "adult persistent asthma inhaled corticosteroid" \
   --top-k 10 \
+  --index-path data/indexes/asthma_recruiting_25_fielded_bm25.pkl \
   --output outputs/clinicaltrials_asthma_recruiting_25_search.json
 ```
+
+BM25 index files are ignored local artifacts. Prefer `.pkl` for speed and only load indexes
+you generated locally from this project.
 
 Run the tiny BM25 retrieval-quality regression check:
 
@@ -123,6 +132,11 @@ This uses fixed synthetic trial/topic/qrels fixtures and fails if recall, MRR, o
 Write a TREC-format BM25 run file and metrics report:
 
 ```bash
+ctmatch build-bm25-index \
+  --trials data/processed/clinicaltrials/benchmark_trials.jsonl \
+  --output data/indexes/trec_2021_fielded_bm25.pkl \
+  --retriever fielded-bm25
+
 ctmatch evaluate-trec-bm25 \
   --trials data/processed/clinicaltrials/benchmark_trials.jsonl \
   --topics data/processed/trec/2021/topics.jsonl \
@@ -130,6 +144,7 @@ ctmatch evaluate-trec-bm25 \
   --run-output outputs/trec_2021_bm25.run \
   --metrics-output outputs/trec_2021_bm25_metrics.json \
   --diagnostics-output outputs/trec_2021_bm25_diagnostics.json \
+  --index-path data/indexes/trec_2021_fielded_bm25.pkl \
   --retriever fielded-bm25 \
   --run-name bm25_2021
 ```
@@ -206,7 +221,20 @@ curl -X POST http://localhost:8000/search \
   -d '{"query":"adult persistent asthma inhaled corticosteroid","top_k":5}'
 ```
 
-Search responses include `latency_ms` fields for corpus loading, retrieval, and total search handling. Every HTTP response also includes an `X-Process-Time-Ms` header, and the API writes structured JSON logs for HTTP requests and search events.
+Search responses include `latency_ms` fields for corpus loading, index loading, retrieval,
+and total search handling. Every HTTP response also includes an `X-Process-Time-Ms`
+header, and the API writes structured JSON logs for HTTP requests and search events.
+
+Set `BM25_INDEX_PATH` when running the API to reuse a persisted BM25 index:
+
+```bash
+TRIAL_CORPUS_PATH=data/processed/clinicaltrials/asthma_recruiting_25.jsonl \
+BM25_INDEX_PATH=data/indexes/asthma_recruiting_25_fielded_bm25.pkl \
+make api
+```
+
+Search responses include `latency_ms.index_load`; after the first request this should usually
+drop near zero because the API also keeps the loaded retriever in memory.
 
 Fetch a full normalized trial record:
 

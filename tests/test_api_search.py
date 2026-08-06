@@ -17,19 +17,26 @@ HAS_FASTAPI = importlib.util.find_spec("fastapi") is not None
 @unittest.skipUnless(HAS_FASTAPI, "FastAPI is not installed")
 class ApiSearchTest(unittest.TestCase):
     def setUp(self) -> None:
-        from clinical_trial_matching.api.main import load_trial_corpus
+        from clinical_trial_matching.api.main import load_search_retriever, load_trial_corpus
 
         load_trial_corpus.cache_clear()
+        load_search_retriever.cache_clear()
         self.previous_corpus_path = os.environ.get("TRIAL_CORPUS_PATH")
+        self.previous_index_path = os.environ.get("BM25_INDEX_PATH")
 
     def tearDown(self) -> None:
-        from clinical_trial_matching.api.main import load_trial_corpus
+        from clinical_trial_matching.api.main import load_search_retriever, load_trial_corpus
 
         if self.previous_corpus_path is None:
             os.environ.pop("TRIAL_CORPUS_PATH", None)
         else:
             os.environ["TRIAL_CORPUS_PATH"] = self.previous_corpus_path
+        if self.previous_index_path is None:
+            os.environ.pop("BM25_INDEX_PATH", None)
+        else:
+            os.environ["BM25_INDEX_PATH"] = self.previous_index_path
         load_trial_corpus.cache_clear()
+        load_search_retriever.cache_clear()
 
     def test_search_returns_traceable_bm25_records_from_configured_corpus(self) -> None:
         from clinical_trial_matching.api.main import SearchRequest, load_trial_corpus, search
@@ -78,6 +85,7 @@ class ApiSearchTest(unittest.TestCase):
         self.assertIn("snippet", payload["results"][0])
         self.assertIn("latency_ms", payload)
         self.assertGreaterEqual(payload["latency_ms"]["corpus_load"], 0)
+        self.assertGreaterEqual(payload["latency_ms"]["index_load"], 0)
         self.assertGreaterEqual(payload["latency_ms"]["retrieval"], 0)
         self.assertGreaterEqual(payload["latency_ms"]["total"], 0)
 

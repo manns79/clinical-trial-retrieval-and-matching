@@ -6,6 +6,7 @@ services:
       DATABASE_URL: postgresql+psycopg://trials:trials@db:5432/trials
       DATA_DIR: /app/data
       TRIAL_CORPUS_PATH: /app/data/processed/clinicaltrials/studies.sample.jsonl
+      BM25_INDEX_PATH: /app/data/indexes/studies_sample_fielded_bm25.pkl
     ports:
       - "8000:8000"
     volumes:
@@ -18,6 +19,10 @@ services:
         python -m clinical_trial_matching.cli ingest-ctgov-studies
         --input /app/data/fixtures/ctgov_v2_studies.sample.json
         --output /app/data/processed/clinicaltrials/studies.sample.jsonl
+        && python -m clinical_trial_matching.cli build-bm25-index
+        --trials /app/data/processed/clinicaltrials/studies.sample.jsonl
+        --output /app/data/indexes/studies_sample_fielded_bm25.pkl
+        --retriever fielded-bm25
         && uvicorn clinical_trial_matching.api.main:app --host 0.0.0.0 --port 8000
     depends_on:
       db:

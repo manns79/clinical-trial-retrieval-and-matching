@@ -49,7 +49,7 @@ class RetrievalRegressionTest(unittest.TestCase):
         self.assertEqual(report["status"], "fail")
         self.assertEqual(
             report["failures"],
-            [{"metric": "precision_at_10", "observed": 0.3333333333333333, "threshold": 0.9}],
+            [{"metric": "precision_at_10", "observed": 0.6666666666666666, "threshold": 0.9}],
         )
 
     def test_cli_writes_passing_report(self) -> None:

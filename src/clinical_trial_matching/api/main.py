@@ -15,7 +15,7 @@ from clinical_trial_matching.ingestion.clinicaltrials import (
 from clinical_trial_matching.io import read_jsonl
 from clinical_trial_matching.models import Trial
 from clinical_trial_matching.observability import configure_logging, elapsed_ms, log_event, now_ms
-from clinical_trial_matching.retrieval.bm25 import search_trials
+from clinical_trial_matching.retrieval.bm25 import load_or_build_bm25_retriever, search_trials
 
 try:
     from fastapi import FastAPI, HTTPException, Request, Response
@@ -98,6 +98,9 @@ def search(request: SearchRequest) -> SearchResponse:
     load_start_ms = now_ms()
     trials = load_trial_corpus()
     corpus_load_ms = elapsed_ms(load_start_ms)
+    index_start_ms = now_ms()
+    retriever = load_search_retriever(request.retriever)
+    index_load_ms = elapsed_ms(index_start_ms)
     retrieval_start_ms = now_ms()
     payload = search_trials(
         trials,
@@ -105,10 +108,12 @@ def search(request: SearchRequest) -> SearchResponse:
         top_k=request.top_k,
         snippet_chars=request.snippet_chars,
         retriever_name=request.retriever,
+        retriever=retriever,
     )
     retrieval_ms = elapsed_ms(retrieval_start_ms)
     payload["latency_ms"] = {
         "corpus_load": corpus_load_ms,
+        "index_load": index_load_ms,
         "retrieval": retrieval_ms,
         "total": elapsed_ms(total_start_ms),
     }
@@ -122,6 +127,7 @@ def search(request: SearchRequest) -> SearchResponse:
             "corpus_trials": payload["corpus"]["trials"],
             "result_count": len(payload["results"]),
             "latency_ms": payload["latency_ms"],
+            "index_path": get_bm25_index_path(),
         },
     )
     return SearchResponse(**payload)
@@ -138,18 +144,25 @@ def get_trial(nct_id: str) -> TrialResponse:
 @app.get("/metrics/health")
 def metrics_health() -> dict[str, object]:
     corpus_path = get_trial_corpus_path()
+    index_path = get_bm25_index_path()
     return {
         "status": "ok",
         "checks": {
             "api": True,
             "trial_corpus_exists": corpus_path.exists(),
+            "bm25_index_exists": Path(index_path).exists() if index_path else False,
         },
         "trial_corpus_path": str(corpus_path),
+        "bm25_index_path": index_path,
     }
 
 
 def get_trial_corpus_path() -> Path:
     return Path(os.getenv("TRIAL_CORPUS_PATH", DEFAULT_TRIAL_CORPUS_PATH))
+
+
+def get_bm25_index_path() -> str:
+    return os.getenv("BM25_INDEX_PATH", "")
 
 
 @lru_cache(maxsize=1)
@@ -164,6 +177,18 @@ def load_trial_corpus() -> tuple[Trial, ...]:
             ),
         )
     return tuple(trial_from_flat_record(row) for row in read_jsonl(corpus_path))
+
+
+@lru_cache(maxsize=4)
+def load_search_retriever(retriever_name: str) -> Any:
+    corpus_path = get_trial_corpus_path()
+    index_path_value = get_bm25_index_path()
+    return load_or_build_bm25_retriever(
+        trials=load_trial_corpus(),
+        retriever_name=retriever_name,
+        corpus_path=corpus_path,
+        index_path=Path(index_path_value) if index_path_value else None,
+    )
 
 
 def get_trial_by_nct_id(nct_id: str) -> Trial | None:

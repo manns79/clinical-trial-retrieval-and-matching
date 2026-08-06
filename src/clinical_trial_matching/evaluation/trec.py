@@ -8,7 +8,12 @@ from typing import Any
 from clinical_trial_matching.evaluation.metrics import summarize_binary_run, summarize_run
 from clinical_trial_matching.ingestion.trec import qrels_to_mapping
 from clinical_trial_matching.models import Qrel, Topic, Trial
-from clinical_trial_matching.retrieval.bm25 import build_bm25_retriever, normalized_field_weights
+from clinical_trial_matching.retrieval.bm25 import (
+    QUERY_STOPWORDS,
+    build_bm25_retriever,
+    load_or_build_bm25_retriever,
+    normalized_field_weights,
+)
 
 
 @dataclass(frozen=True)
@@ -31,16 +36,31 @@ def build_bm25_trec_run(
     top_k: int = 100,
     retriever_name: str = "bm25",
     field_weights: dict[str, float] | None = None,
+    corpus_path: Path | None = None,
+    index_path: Path | None = None,
+    rebuild_index: bool = False,
 ) -> list[TrecRunRow]:
     if top_k < 1:
         raise ValueError("Top-K must be at least 1")
     if not run_name.strip():
         raise ValueError("Run name cannot be empty")
 
-    retriever = build_bm25_retriever(
-        trials,
-        retriever_name=retriever_name,
-        field_weights=field_weights,
+    trial_list = list(trials)
+    retriever = (
+        load_or_build_bm25_retriever(
+            trials=trial_list,
+            retriever_name=retriever_name,
+            field_weights=field_weights,
+            corpus_path=corpus_path,
+            index_path=index_path,
+            rebuild_index=rebuild_index,
+        )
+        if index_path
+        else build_bm25_retriever(
+            trial_list,
+            retriever_name=retriever_name,
+            field_weights=field_weights,
+        )
     )
     rows: list[TrecRunRow] = []
     for topic in topics:
@@ -251,6 +271,7 @@ def bm25_retriever_parameters(
     *,
     field_weights: dict[str, float] | None = None,
 ) -> dict[str, Any]:
+    parameters: dict[str, Any] = {"query_stopwords": sorted(QUERY_STOPWORDS)}
     if retriever_name == "fielded-bm25":
-        return {"field_weights": normalized_field_weights(field_weights)}
-    return {}
+        parameters["field_weights"] = normalized_field_weights(field_weights)
+    return parameters

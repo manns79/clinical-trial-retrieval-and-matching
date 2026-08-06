@@ -39,7 +39,12 @@ from clinical_trial_matching.ingestion.trec import (
 )
 from clinical_trial_matching.io import read_jsonl, write_json, write_jsonl
 from clinical_trial_matching.models import Qrel
-from clinical_trial_matching.retrieval.bm25 import BM25Retriever, search_trials
+from clinical_trial_matching.retrieval.bm25 import (
+    BM25Retriever,
+    load_or_build_bm25_retriever,
+    save_bm25_index,
+    search_trials,
+)
 from clinical_trial_matching.validation.trials import summarize_trial_corpus
 
 
@@ -107,6 +112,8 @@ def main() -> None:
     trec_bm25.add_argument("--run-output", type=Path, required=True)
     trec_bm25.add_argument("--metrics-output", type=Path, required=True)
     trec_bm25.add_argument("--diagnostics-output", type=Path)
+    trec_bm25.add_argument("--index-path", type=Path)
+    trec_bm25.add_argument("--rebuild-index", action="store_true")
     trec_bm25.add_argument("--run-name", default="bm25")
     trec_bm25.add_argument("--top-k", type=int, default=100)
     trec_bm25.add_argument("--retriever", choices=["bm25", "fielded-bm25"], default="fielded-bm25")
@@ -144,10 +151,26 @@ def main() -> None:
     trial_search.add_argument("--trials", type=Path, required=True)
     trial_search.add_argument("--query", required=True)
     trial_search.add_argument("--output", type=Path)
+    trial_search.add_argument("--index-path", type=Path)
+    trial_search.add_argument("--rebuild-index", action="store_true")
     trial_search.add_argument("--top-k", type=int, default=10)
     trial_search.add_argument("--snippet-chars", type=int, default=240)
     trial_search.add_argument("--retriever", choices=["bm25", "fielded-bm25"], default="fielded-bm25")
     trial_search.add_argument(
+        "--field-weight",
+        action="append",
+        default=[],
+        help="Optional field=weight override for fielded-bm25. May be provided multiple times.",
+    )
+
+    bm25_index = subparsers.add_parser(
+        "build-bm25-index",
+        help="Build and persist a reusable BM25 index for a normalized trial corpus.",
+    )
+    bm25_index.add_argument("--trials", type=Path, required=True)
+    bm25_index.add_argument("--output", type=Path, required=True)
+    bm25_index.add_argument("--retriever", choices=["bm25", "fielded-bm25"], default="fielded-bm25")
+    bm25_index.add_argument(
         "--field-weight",
         action="append",
         default=[],
@@ -241,6 +264,8 @@ def main() -> None:
             top_k=args.top_k,
             retriever_name=args.retriever,
             field_weights=parse_field_weights(args.field_weight),
+            index_path=args.index_path,
+            rebuild_index=args.rebuild_index,
         )
     elif args.command == "check-retrieval-regression":
         check_retrieval_regression(
@@ -266,6 +291,15 @@ def main() -> None:
             args.snippet_chars,
             args.retriever,
             parse_field_weights(args.field_weight),
+            args.index_path,
+            args.rebuild_index,
+        )
+    elif args.command == "build-bm25-index":
+        build_bm25_index(
+            trials_path=args.trials,
+            output_path=args.output,
+            retriever_name=args.retriever,
+            field_weights=parse_field_weights(args.field_weight),
         )
     elif args.command == "ingest-trec-topics":
         ingest_trec_topics(args.year, args.input, args.output)
@@ -459,6 +493,8 @@ def evaluate_trec_bm25(
     top_k: int,
     retriever_name: str = "fielded-bm25",
     field_weights: dict[str, float] | None = None,
+    index_path: Path | None = None,
+    rebuild_index: bool = False,
 ) -> None:
     trials = [trial_from_flat_record(row) for row in read_jsonl(trials_path)]
     topics = [topic_from_json_record(row) for row in read_jsonl(topics_path)]
@@ -470,6 +506,9 @@ def evaluate_trec_bm25(
         top_k=top_k,
         retriever_name=retriever_name,
         field_weights=field_weights,
+        corpus_path=trials_path,
+        index_path=index_path,
+        rebuild_index=rebuild_index,
     )
     write_trec_run(run_output_path, rows)
     retriever_parameters = bm25_retriever_parameters(
@@ -561,12 +600,22 @@ def search_trials_bm25(
     snippet_chars: int,
     retriever_name: str,
     field_weights: dict[str, float],
+    index_path: Path | None,
+    rebuild_index: bool,
 ) -> None:
     if top_k < 1:
         raise ValueError("Top-K must be at least 1")
     if snippet_chars < 1:
         raise ValueError("Snippet chars must be at least 1")
     trials = [trial_from_flat_record(row) for row in read_jsonl(trials_path)]
+    retriever = load_or_build_bm25_retriever(
+        trials=trials,
+        retriever_name=retriever_name,
+        field_weights=field_weights,
+        corpus_path=trials_path,
+        index_path=index_path,
+        rebuild_index=rebuild_index,
+    )
     payload = search_trials(
         trials,
         query=query,
@@ -574,6 +623,7 @@ def search_trials_bm25(
         snippet_chars=snippet_chars,
         retriever_name=retriever_name,
         field_weights=field_weights,
+        retriever=retriever,
     )
     if output_path:
         write_json(output_path, payload)
@@ -586,6 +636,27 @@ def search_trials_bm25(
             )
             print(f"   matched_terms={', '.join(result['matched_terms'])}")
             print(f"   snippet={result['snippet']}")
+
+
+def build_bm25_index(
+    *,
+    trials_path: Path,
+    output_path: Path,
+    retriever_name: str,
+    field_weights: dict[str, float],
+) -> None:
+    trials = [trial_from_flat_record(row) for row in read_jsonl(trials_path)]
+    record = save_bm25_index(
+        output_path,
+        trials,
+        retriever_name=retriever_name,
+        field_weights=field_weights,
+        corpus_path=trials_path,
+    )
+    print(
+        f"Wrote {record['index']['retriever']} index for "
+        f"{record['corpus']['trials']} trials to {output_path}"
+    )
 
 
 def read_qrels(path: Path) -> dict[str, dict[str, int]]:
