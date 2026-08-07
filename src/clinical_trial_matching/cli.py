@@ -3,6 +3,12 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+from clinical_trial_matching.evaluation.comparison import (
+    build_metrics_comparison,
+    infer_comparison_format,
+    parse_metrics_spec,
+    write_metrics_comparison,
+)
 from clinical_trial_matching.evaluation.metrics import summarize_run
 from clinical_trial_matching.evaluation.regression import (
     DEFAULT_THRESHOLDS,
@@ -177,6 +183,29 @@ def main() -> None:
         help="Optional field=weight override for fielded-bm25. May be provided multiple times.",
     )
 
+    compare_metrics_parser = subparsers.add_parser(
+        "compare-metrics",
+        help="Compare multiple retrieval metrics JSON reports in a compact table.",
+    )
+    compare_metrics_parser.add_argument(
+        "--metrics",
+        action="append",
+        required=True,
+        help="Metrics JSON path, optionally label=path. May be provided multiple times.",
+    )
+    compare_metrics_parser.add_argument("--output", type=Path, required=True)
+    compare_metrics_parser.add_argument(
+        "--format",
+        choices=["markdown", "csv", "json"],
+        help="Output format. Defaults from output suffix.",
+    )
+    compare_metrics_parser.add_argument(
+        "--view",
+        action="append",
+        default=[],
+        help="Optional metric view to include, such as eligible_only. May be provided multiple times.",
+    )
+
     trec_topics = subparsers.add_parser(
         "ingest-trec-topics", help="Normalize TREC Clinical Trials topics XML to JSONL."
     )
@@ -300,6 +329,13 @@ def main() -> None:
             output_path=args.output,
             retriever_name=args.retriever,
             field_weights=parse_field_weights(args.field_weight),
+        )
+    elif args.command == "compare-metrics":
+        compare_metrics(
+            metrics_specs=args.metrics,
+            output_path=args.output,
+            output_format=args.format,
+            views=args.view,
         )
     elif args.command == "ingest-trec-topics":
         ingest_trec_topics(args.year, args.input, args.output)
@@ -657,6 +693,20 @@ def build_bm25_index(
         f"Wrote {record['index']['retriever']} index for "
         f"{record['corpus']['trials']} trials to {output_path}"
     )
+
+
+def compare_metrics(
+    *,
+    metrics_specs: list[str],
+    output_path: Path,
+    output_format: str | None,
+    views: list[str],
+) -> None:
+    specs = [parse_metrics_spec(spec) for spec in metrics_specs]
+    comparison = build_metrics_comparison(specs, views=views)
+    resolved_format = infer_comparison_format(output_path, output_format)
+    write_metrics_comparison(output_path, comparison, resolved_format)
+    print(f"Wrote {len(comparison['rows'])} comparison rows to {output_path}")
 
 
 def read_qrels(path: Path) -> dict[str, dict[str, int]]:

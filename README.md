@@ -158,6 +158,19 @@ The metrics report includes separate `excluded_or_eligible` and `eligible_only` 
 topical retrieval quality is not confused with true eligibility matching. The diagnostics
 file records per-topic recall, first eligible rank, and a compact list of weak topics.
 
+Compare several metrics reports in one compact table:
+
+```bash
+ctmatch compare-metrics \
+  --metrics plain_bm25=outputs/trec_2021_plain_bm25_metrics.json \
+  --metrics fielded_bm25=outputs/trec_2021_bm25_metrics.json \
+  --output outputs/trec_2021_baseline_comparison.md \
+  --view eligible_only \
+  --view excluded_or_eligible
+```
+
+The output format is inferred from the suffix: `.md`, `.csv`, or `.json`.
+
 If you built a ClinicalTrials.gov corpus before `brief_summary` was added, re-normalize
 from the ignored raw JSON before benchmarking so summary boosts are populated:
 
