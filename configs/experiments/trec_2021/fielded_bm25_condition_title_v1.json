@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "name": "trec_2021_fielded_bm25_condition_title_v1",
+  "description": "Candidate fielded BM25 profile with stronger condition, title, summary, and eligibility boosts.",
+  "project_root": "../../..",
+  "retriever": "fielded-bm25",
+  "field_weights": {
+    "all_text": 1.0,
+    "title": 1.25,
+    "brief_summary": 0.75,
+    "conditions": 1.5,
+    "interventions": 0.25,
+    "eligibility_criteria": 0.5,
+    "demographics": 0.1,
+    "status": 0.05,
+    "locations": 0.05
+  },
+  "benchmark": {
+    "trials": "data/processed/clinicaltrials/trec_2021_qrels_trials.jsonl",
+    "topics": "data/processed/trec/2021/topics.jsonl",
+    "qrels": "data/processed/trec/2021/qrels.jsonl",
+    "top_k": 100
+  },
+  "artifacts": {
+    "index": "data/indexes/trec_2021_fielded_bm25_condition_title_v1.pkl",
+    "run": "outputs/trec_2021_fielded_bm25_condition_title_v1.run",
+    "metrics": "outputs/trec_2021_fielded_bm25_condition_title_v1_metrics.json",
+    "diagnostics": "outputs/trec_2021_fielded_bm25_condition_title_v1_diagnostics.json"
+  }
+}

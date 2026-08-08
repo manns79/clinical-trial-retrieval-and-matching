@@ -171,6 +171,29 @@ ctmatch compare-metrics \
 
 The output format is inferred from the suffix: `.md`, `.csv`, or `.json`.
 
+Reproduce named BM25 experiments from the tracked registry instead of repeating paths and
+field-weight flags:
+
+```bash
+make run-trec-2021-bm25
+make run-trec-2021-fielded-bm25
+make run-trec-2021-fielded-bm25-candidate
+make compare-trec-2021-bm25
+```
+
+The underlying command accepts any compatible experiment spec:
+
+```bash
+ctmatch run-bm25-experiment \
+  --config configs/experiments/trec_2021/fielded_bm25.json
+```
+
+Specs under `configs/experiments/` pin the retriever, all field weights, benchmark inputs,
+and local artifact paths. Metrics and diagnostics include the config path and SHA-256 checksum
+that produced them. The condition/title-heavy profile is a candidate until benchmark results
+show whether it improves on the pinned fielded baseline. Data and generated artifacts remain
+ignored and must not be committed.
+
 If you built a ClinicalTrials.gov corpus before `brief_summary` was added, re-normalize
 from the ignored raw JSON before benchmarking so summary boosts are populated:
 

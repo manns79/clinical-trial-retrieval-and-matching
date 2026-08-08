@@ -9,6 +9,7 @@ from clinical_trial_matching.evaluation.comparison import (
     parse_metrics_spec,
     write_metrics_comparison,
 )
+from clinical_trial_matching.evaluation.experiments import load_bm25_experiment
 from clinical_trial_matching.evaluation.metrics import summarize_run
 from clinical_trial_matching.evaluation.regression import (
     DEFAULT_THRESHOLDS,
@@ -16,15 +17,15 @@ from clinical_trial_matching.evaluation.regression import (
 )
 from clinical_trial_matching.evaluation.trec import (
     bm25_retriever_parameters,
-    bm25_trec_topic_diagnostics,
     bm25_trec_evaluation_report,
+    bm25_trec_topic_diagnostics,
     build_bm25_trec_run,
     write_trec_run,
 )
 from clinical_trial_matching.ingestion.clinicaltrials import (
     CTGOV_API_BASE_URL,
-    fetch_ctgov_studies_by_ids,
     fetch_ctgov_studies,
+    fetch_ctgov_studies_by_ids,
     parse_studies_json,
     trial_from_flat_record,
     trial_to_flat_record,
@@ -183,6 +184,17 @@ def main() -> None:
         help="Optional field=weight override for fielded-bm25. May be provided multiple times.",
     )
 
+    bm25_experiment = subparsers.add_parser(
+        "run-bm25-experiment",
+        help="Run a reproducible BM25 benchmark from a versioned experiment config.",
+    )
+    bm25_experiment.add_argument("--config", type=Path, required=True)
+    bm25_experiment.add_argument(
+        "--rebuild-index",
+        action="store_true",
+        help="Rebuild the configured index even when a compatible cached index exists.",
+    )
+
     compare_metrics_parser = subparsers.add_parser(
         "compare-metrics",
         help="Compare multiple retrieval metrics JSON reports in a compact table.",
@@ -330,6 +342,8 @@ def main() -> None:
             retriever_name=args.retriever,
             field_weights=parse_field_weights(args.field_weight),
         )
+    elif args.command == "run-bm25-experiment":
+        run_bm25_experiment(args.config, rebuild_index=args.rebuild_index)
     elif args.command == "compare-metrics":
         compare_metrics(
             metrics_specs=args.metrics,
@@ -531,6 +545,7 @@ def evaluate_trec_bm25(
     field_weights: dict[str, float] | None = None,
     index_path: Path | None = None,
     rebuild_index: bool = False,
+    experiment_metadata: dict[str, str | int] | None = None,
 ) -> None:
     trials = [trial_from_flat_record(row) for row in read_jsonl(trials_path)]
     topics = [topic_from_json_record(row) for row in read_jsonl(topics_path)]
@@ -561,6 +576,8 @@ def evaluate_trec_bm25(
         retriever_name=retriever_name,
         retriever_parameters=retriever_parameters,
     )
+    if experiment_metadata:
+        report["experiment"] = experiment_metadata
     write_json(metrics_output_path, report)
     if diagnostics_output_path:
         diagnostics = bm25_trec_topic_diagnostics(
@@ -572,6 +589,8 @@ def evaluate_trec_bm25(
             retriever_name=retriever_name,
             retriever_parameters=retriever_parameters,
         )
+        if experiment_metadata:
+            diagnostics["experiment"] = experiment_metadata
         write_json(diagnostics_output_path, diagnostics)
     print(f"Wrote TREC run file to {run_output_path}")
     print(f"Wrote TREC BM25 metrics report to {metrics_output_path}")
@@ -692,6 +711,26 @@ def build_bm25_index(
     print(
         f"Wrote {record['index']['retriever']} index for "
         f"{record['corpus']['trials']} trials to {output_path}"
+    )
+
+
+def run_bm25_experiment(config_path: Path, *, rebuild_index: bool = False) -> None:
+    experiment = load_bm25_experiment(config_path)
+    print(f"Running BM25 experiment {experiment.name} from {experiment.config_label}")
+    evaluate_trec_bm25(
+        trials_path=experiment.trials_path,
+        topics_path=experiment.topics_path,
+        qrels_path=experiment.qrels_path,
+        run_output_path=experiment.run_output_path,
+        metrics_output_path=experiment.metrics_output_path,
+        diagnostics_output_path=experiment.diagnostics_output_path,
+        run_name=experiment.name,
+        top_k=experiment.top_k,
+        retriever_name=experiment.retriever,
+        field_weights=experiment.field_weights,
+        index_path=experiment.index_path,
+        rebuild_index=rebuild_index,
+        experiment_metadata=experiment.metadata(),
     )
 
 
