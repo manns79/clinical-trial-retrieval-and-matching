@@ -15,5 +15,6 @@ Use `--rebuild-index` after changing a corpus or when intentionally replacing an
 Benchmark data, indexes, run files, metrics, and diagnostics remain ignored. Configs must never
 contain patient data, secrets, tokens, or copied benchmark records.
 
-The `condition_title_v1` spec is a candidate weighting profile. Treat it as tuned only if its
-held-out metrics improve over the pinned fielded baseline.
+The TREC 2021 tuning specs read only the deterministic development partition. Choose a profile
+from development metrics, freeze it, and then create one holdout spec for final evaluation.
+Do not repeatedly compare candidates on holdout metrics.

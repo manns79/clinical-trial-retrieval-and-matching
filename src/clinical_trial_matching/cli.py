@@ -15,6 +15,10 @@ from clinical_trial_matching.evaluation.regression import (
     DEFAULT_THRESHOLDS,
     run_bm25_regression_check,
 )
+from clinical_trial_matching.evaluation.splits import (
+    build_trec_topic_split,
+    topic_split_report,
+)
 from clinical_trial_matching.evaluation.trec import (
     bm25_retriever_parameters,
     bm25_trec_evaluation_report,
@@ -33,6 +37,7 @@ from clinical_trial_matching.ingestion.clinicaltrials import (
 from clinical_trial_matching.ingestion.manifest import (
     build_source_manifest,
     manifest_to_json_record,
+    sha256_file,
 )
 from clinical_trial_matching.ingestion.trec import (
     parse_qrels,
@@ -108,6 +113,20 @@ def main() -> None:
     evaluate.add_argument("--qrels", type=Path, required=True)
     evaluate.add_argument("--output", type=Path, required=True)
     evaluate.add_argument("--top-k", type=int, default=100)
+
+    topic_split = subparsers.add_parser(
+        "split-trec-topics",
+        help="Create deterministic development and holdout topic/qrels partitions.",
+    )
+    topic_split.add_argument("--topics", type=Path, required=True)
+    topic_split.add_argument("--qrels", type=Path, required=True)
+    topic_split.add_argument("--development-topics-output", type=Path, required=True)
+    topic_split.add_argument("--development-qrels-output", type=Path, required=True)
+    topic_split.add_argument("--holdout-topics-output", type=Path, required=True)
+    topic_split.add_argument("--holdout-qrels-output", type=Path, required=True)
+    topic_split.add_argument("--report-output", type=Path, required=True)
+    topic_split.add_argument("--seed", default="ctmatch-trec-2021-v1")
+    topic_split.add_argument("--holdout-fraction", type=float, default=0.2)
 
     trec_bm25 = subparsers.add_parser(
         "evaluate-trec-bm25",
@@ -293,6 +312,18 @@ def main() -> None:
         )
     elif args.command == "evaluate-baseline":
         evaluate_baseline(args.trials, args.topics, args.qrels, args.output, args.top_k)
+    elif args.command == "split-trec-topics":
+        write_trec_topic_split(
+            topics_path=args.topics,
+            qrels_path=args.qrels,
+            development_topics_output=args.development_topics_output,
+            development_qrels_output=args.development_qrels_output,
+            holdout_topics_output=args.holdout_topics_output,
+            holdout_qrels_output=args.holdout_qrels_output,
+            report_output=args.report_output,
+            seed=args.seed,
+            holdout_fraction=args.holdout_fraction,
+        )
     elif args.command == "evaluate-trec-bm25":
         evaluate_trec_bm25(
             trials_path=args.trials,
@@ -596,6 +627,64 @@ def evaluate_trec_bm25(
     print(f"Wrote TREC BM25 metrics report to {metrics_output_path}")
     if diagnostics_output_path:
         print(f"Wrote TREC BM25 topic diagnostics to {diagnostics_output_path}")
+
+
+def write_trec_topic_split(
+    *,
+    topics_path: Path,
+    qrels_path: Path,
+    development_topics_output: Path,
+    development_qrels_output: Path,
+    holdout_topics_output: Path,
+    holdout_qrels_output: Path,
+    report_output: Path,
+    seed: str,
+    holdout_fraction: float,
+) -> None:
+    topics = [topic_from_json_record(row) for row in read_jsonl(topics_path)]
+    qrels = read_qrels_records(qrels_path)
+    split = build_trec_topic_split(
+        topics,
+        qrels,
+        seed=seed,
+        holdout_fraction=holdout_fraction,
+    )
+
+    write_jsonl(
+        development_topics_output,
+        (topic_to_json_record(topic) for topic in split.development_topics),
+    )
+    write_jsonl(
+        development_qrels_output,
+        (qrel_to_json_record(qrel) for qrel in split.development_qrels),
+    )
+    write_jsonl(
+        holdout_topics_output,
+        (topic_to_json_record(topic) for topic in split.holdout_topics),
+    )
+    write_jsonl(
+        holdout_qrels_output,
+        (qrel_to_json_record(qrel) for qrel in split.holdout_qrels),
+    )
+    report = topic_split_report(
+        split,
+        topics_source=_split_source_record(topics_path),
+        qrels_source=_split_source_record(qrels_path),
+    )
+    write_json(report_output, report)
+    print(
+        f"Wrote {len(split.development_topics)} development topics and "
+        f"{len(split.holdout_topics)} holdout topics"
+    )
+    print(f"Wrote TREC topic split report to {report_output}")
+
+
+def _split_source_record(path: Path) -> dict[str, str | int]:
+    return {
+        "path": str(path),
+        "sha256": sha256_file(path),
+        "bytes": path.stat().st_size,
+    }
 
 
 def check_retrieval_regression(

@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "name": "trec_2021_fielded_bm25",
-  "description": "Pinned field-aware BM25 baseline with conservative structured-field boosts.",
+  "name": "trec_2021_development_fielded_bm25",
+  "description": "Pinned field-aware BM25 baseline evaluated on the deterministic development topics.",
   "project_root": "../../..",
   "retriever": "fielded-bm25",
   "field_weights": {
@@ -17,14 +17,14 @@
   },
   "benchmark": {
     "trials": "data/processed/clinicaltrials/trec_2021_qrels_trials.jsonl",
-    "topics": "data/processed/trec/2021/topics.jsonl",
-    "qrels": "data/processed/trec/2021/qrels.jsonl",
+    "topics": "data/processed/trec/2021/splits/development/topics.jsonl",
+    "qrels": "data/processed/trec/2021/splits/development/qrels.jsonl",
     "top_k": 100
   },
   "artifacts": {
     "index": "data/indexes/trec_2021_fielded_bm25.pkl",
-    "run": "outputs/trec_2021_fielded_bm25.run",
-    "metrics": "outputs/trec_2021_fielded_bm25_metrics.json",
-    "diagnostics": "outputs/trec_2021_fielded_bm25_diagnostics.json"
+    "run": "outputs/trec_2021_development_fielded_bm25.run",
+    "metrics": "outputs/trec_2021_development_fielded_bm25_metrics.json",
+    "diagnostics": "outputs/trec_2021_development_fielded_bm25_diagnostics.json"
   }
 }

@@ -175,11 +175,18 @@ Reproduce named BM25 experiments from the tracked registry instead of repeating 
 field-weight flags:
 
 ```bash
+make split-trec-2021-topics
 make run-trec-2021-bm25
 make run-trec-2021-fielded-bm25
 make run-trec-2021-fielded-bm25-candidate
 make compare-trec-2021-bm25
 ```
+
+The split command uses seeded SHA-256 ranking to assign exactly 20% of topics to holdout. For
+TREC 2021 this produces 60 development topics and 15 holdout topics, partitions their qrels with
+the same assignment, and writes `outputs/trec_2021_topic_split.json` with source checksums,
+topic IDs, relevance distributions, and overlap checks. Re-running it with the same inputs and
+seed produces the same assignments.
 
 The underlying command accepts any compatible experiment spec:
 
@@ -190,9 +197,14 @@ ctmatch run-bm25-experiment \
 
 Specs under `configs/experiments/` pin the retriever, all field weights, benchmark inputs,
 and local artifact paths. Metrics and diagnostics include the config path and SHA-256 checksum
-that produced them. The condition/title-heavy profile is a candidate until benchmark results
-show whether it improves on the pinned fielded baseline. Data and generated artifacts remain
-ignored and must not be committed.
+that produced them. The current tuning specs read only the development partition. Select and
+freeze one lexical profile before evaluating it on holdout; do not use holdout metrics for
+iterative weight selection. Data, split records, and generated artifacts remain ignored and
+must not be committed.
+
+This project inspected full TREC 2021 metrics before introducing the split, so the 2021 holdout
+is a workflow guardrail rather than a claim of a historically unseen test set. A later TREC year
+should provide the stronger external evaluation.
 
 If you built a ClinicalTrials.gov corpus before `brief_summary` was added, re-normalize
 from the ignored raw JSON before benchmarking so summary boosts are populated:
