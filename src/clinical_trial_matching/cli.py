@@ -9,7 +9,10 @@ from clinical_trial_matching.evaluation.comparison import (
     parse_metrics_spec,
     write_metrics_comparison,
 )
-from clinical_trial_matching.evaluation.experiments import load_bm25_experiment
+from clinical_trial_matching.evaluation.experiments import (
+    load_bm25_experiment,
+    load_dense_experiment,
+)
 from clinical_trial_matching.evaluation.metrics import summarize_run
 from clinical_trial_matching.evaluation.regression import (
     DEFAULT_THRESHOLDS,
@@ -24,6 +27,9 @@ from clinical_trial_matching.evaluation.trec import (
     bm25_trec_evaluation_report,
     bm25_trec_topic_diagnostics,
     build_bm25_trec_run,
+    build_dense_trec_run,
+    trec_evaluation_report,
+    trec_topic_diagnostics,
     write_trec_run,
 )
 from clinical_trial_matching.ingestion.clinicaltrials import (
@@ -56,6 +62,14 @@ from clinical_trial_matching.retrieval.bm25 import (
     load_or_build_bm25_retriever,
     save_bm25_index,
     search_trials,
+)
+from clinical_trial_matching.retrieval.dense import (
+    DENSE_RETRIEVER_NAME,
+    TEXT_REPRESENTATIONS,
+    SentenceTransformerEncoder,
+    build_dense_index,
+    load_or_build_dense_retriever,
+    save_dense_index,
 )
 from clinical_trial_matching.validation.trials import summarize_trial_corpus
 
@@ -213,6 +227,37 @@ def main() -> None:
         action="store_true",
         help="Rebuild the configured index even when a compatible cached index exists.",
     )
+
+    dense_index = subparsers.add_parser(
+        "build-dense-index",
+        help="Embed a normalized trial corpus and persist a reusable NumPy dense index.",
+    )
+    _add_dense_model_arguments(dense_index)
+    dense_index.add_argument("--trials", type=Path, required=True)
+    dense_index.add_argument("--output", type=Path, required=True)
+
+    dense_evaluation = subparsers.add_parser(
+        "evaluate-trec-dense",
+        help="Evaluate a sentence-transformer bi-encoder on normalized TREC benchmark files.",
+    )
+    _add_dense_model_arguments(dense_evaluation)
+    dense_evaluation.add_argument("--trials", type=Path, required=True)
+    dense_evaluation.add_argument("--topics", type=Path, required=True)
+    dense_evaluation.add_argument("--qrels", type=Path, required=True)
+    dense_evaluation.add_argument("--index-path", type=Path, required=True)
+    dense_evaluation.add_argument("--run-output", type=Path, required=True)
+    dense_evaluation.add_argument("--metrics-output", type=Path, required=True)
+    dense_evaluation.add_argument("--diagnostics-output", type=Path)
+    dense_evaluation.add_argument("--run-name", default="dense_bi_encoder")
+    dense_evaluation.add_argument("--top-k", type=int, default=100)
+    dense_evaluation.add_argument("--rebuild-index", action="store_true")
+
+    dense_experiment = subparsers.add_parser(
+        "run-dense-experiment",
+        help="Run a reproducible dense benchmark from a versioned experiment config.",
+    )
+    dense_experiment.add_argument("--config", type=Path, required=True)
+    dense_experiment.add_argument("--rebuild-index", action="store_true")
 
     compare_metrics_parser = subparsers.add_parser(
         "compare-metrics",
@@ -375,6 +420,36 @@ def main() -> None:
         )
     elif args.command == "run-bm25-experiment":
         run_bm25_experiment(args.config, rebuild_index=args.rebuild_index)
+    elif args.command == "build-dense-index":
+        build_dense_index_command(
+            trials_path=args.trials,
+            output_path=args.output,
+            model_name=args.model_name,
+            text_representation=args.text_representation,
+            batch_size=args.batch_size,
+            device=args.device,
+            max_seq_length=args.max_seq_length,
+        )
+    elif args.command == "evaluate-trec-dense":
+        evaluate_trec_dense(
+            trials_path=args.trials,
+            topics_path=args.topics,
+            qrels_path=args.qrels,
+            index_path=args.index_path,
+            run_output_path=args.run_output,
+            metrics_output_path=args.metrics_output,
+            diagnostics_output_path=args.diagnostics_output,
+            run_name=args.run_name,
+            top_k=args.top_k,
+            model_name=args.model_name,
+            text_representation=args.text_representation,
+            batch_size=args.batch_size,
+            device=args.device,
+            max_seq_length=args.max_seq_length,
+            rebuild_index=args.rebuild_index,
+        )
+    elif args.command == "run-dense-experiment":
+        run_dense_experiment(args.config, rebuild_index=args.rebuild_index)
     elif args.command == "compare-metrics":
         compare_metrics(
             metrics_specs=args.metrics,
@@ -823,6 +898,144 @@ def run_bm25_experiment(config_path: Path, *, rebuild_index: bool = False) -> No
     )
 
 
+def build_dense_index_command(
+    *,
+    trials_path: Path,
+    output_path: Path,
+    model_name: str,
+    text_representation: str,
+    batch_size: int,
+    device: str,
+    max_seq_length: int | None,
+) -> None:
+    trials = [trial_from_flat_record(row) for row in read_jsonl(trials_path)]
+    encoder = SentenceTransformerEncoder(
+        model_name,
+        device=device,
+        max_seq_length=max_seq_length,
+    )
+    index = build_dense_index(
+        trials,
+        encoder=encoder,
+        model_name=model_name,
+        text_representation=text_representation,
+        batch_size=batch_size,
+        device=device,
+        max_seq_length=max_seq_length,
+    )
+    save_dense_index(output_path, index)
+    print(
+        f"Wrote {index.metadata['embedding_dimension']}-dimensional dense index for "
+        f"{index.metadata['trials']} trials to {output_path}"
+    )
+
+
+def evaluate_trec_dense(
+    *,
+    trials_path: Path,
+    topics_path: Path,
+    qrels_path: Path,
+    index_path: Path,
+    run_output_path: Path,
+    metrics_output_path: Path,
+    diagnostics_output_path: Path | None,
+    run_name: str,
+    top_k: int,
+    model_name: str,
+    text_representation: str,
+    batch_size: int,
+    device: str,
+    max_seq_length: int | None,
+    rebuild_index: bool = False,
+    experiment_metadata: dict[str, str | int] | None = None,
+) -> None:
+    trials = [trial_from_flat_record(row) for row in read_jsonl(trials_path)]
+    topics = [topic_from_json_record(row) for row in read_jsonl(topics_path)]
+    qrels = read_qrels_records(qrels_path)
+    retriever = load_or_build_dense_retriever(
+        trials=trials,
+        model_name=model_name,
+        text_representation=text_representation,
+        batch_size=batch_size,
+        device=device,
+        max_seq_length=max_seq_length,
+        index_path=index_path,
+        rebuild_index=rebuild_index,
+    )
+    rows = build_dense_trec_run(
+        retriever=retriever,
+        topics=topics,
+        run_name=run_name,
+        top_k=top_k,
+    )
+    write_trec_run(run_output_path, rows)
+    parameters = {
+        "model_name": model_name,
+        "text_representation": text_representation,
+        "batch_size": batch_size,
+        "device": device,
+        "max_seq_length": max_seq_length,
+        "normalize_embeddings": True,
+        "embedding_dimension": retriever.index.metadata["embedding_dimension"],
+        "index_schema_version": retriever.index.metadata["schema_version"],
+        "corpus_fingerprint": retriever.index.metadata["corpus_fingerprint"],
+    }
+    report = trec_evaluation_report(
+        rows=rows,
+        qrels=qrels,
+        run_name=run_name,
+        top_k=top_k,
+        topics_count=len(topics),
+        trials_count=len(trials),
+        retriever_name=DENSE_RETRIEVER_NAME,
+        retriever_parameters=parameters,
+    )
+    if experiment_metadata:
+        report["experiment"] = experiment_metadata
+    write_json(metrics_output_path, report)
+    if diagnostics_output_path:
+        diagnostics = trec_topic_diagnostics(
+            rows=rows,
+            qrels=qrels,
+            topics=topics,
+            run_name=run_name,
+            top_k=top_k,
+            retriever_name=DENSE_RETRIEVER_NAME,
+            retriever_parameters=parameters,
+        )
+        if experiment_metadata:
+            diagnostics["experiment"] = experiment_metadata
+        write_json(diagnostics_output_path, diagnostics)
+
+    print(f"Wrote TREC dense run file to {run_output_path}")
+    print(f"Wrote TREC dense metrics report to {metrics_output_path}")
+    if diagnostics_output_path:
+        print(f"Wrote TREC dense topic diagnostics to {diagnostics_output_path}")
+
+
+def run_dense_experiment(config_path: Path, *, rebuild_index: bool = False) -> None:
+    experiment = load_dense_experiment(config_path)
+    print(f"Running dense experiment {experiment.name} from {experiment.config_label}")
+    evaluate_trec_dense(
+        trials_path=experiment.trials_path,
+        topics_path=experiment.topics_path,
+        qrels_path=experiment.qrels_path,
+        index_path=experiment.index_path,
+        run_output_path=experiment.run_output_path,
+        metrics_output_path=experiment.metrics_output_path,
+        diagnostics_output_path=experiment.diagnostics_output_path,
+        run_name=experiment.name,
+        top_k=experiment.top_k,
+        model_name=experiment.model_name,
+        text_representation=experiment.text_representation,
+        batch_size=experiment.batch_size,
+        device=experiment.device,
+        max_seq_length=experiment.max_seq_length,
+        rebuild_index=rebuild_index,
+        experiment_metadata=experiment.metadata(),
+    )
+
+
 def compare_metrics(
     *,
     metrics_specs: list[str],
@@ -936,6 +1149,21 @@ def parse_field_weights(items: list[str]) -> dict[str, float]:
         except ValueError as exc:
             raise ValueError(f"Invalid weight for field {field!r}: {value!r}") from exc
     return weights
+
+
+def _add_dense_model_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--model-name",
+        default="sentence-transformers/all-MiniLM-L6-v2",
+    )
+    parser.add_argument(
+        "--text-representation",
+        choices=sorted(TEXT_REPRESENTATIONS),
+        default="title_summary_conditions",
+    )
+    parser.add_argument("--batch-size", type=int, default=64)
+    parser.add_argument("--device", default="cpu")
+    parser.add_argument("--max-seq-length", type=int, default=256)
 
 
 def slugify(value: str) -> str:

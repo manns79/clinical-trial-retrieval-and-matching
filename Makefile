@@ -1,7 +1,7 @@
 PYTHON ?= python3
 PYTHONPATH ?= src
 
-.PHONY: install install-dev install-ui test compile ingest-sample ingest-ctgov-sample report-ctgov-sample search-ctgov-sample download-ctgov-small build-trec-corpus-smoke build-bm25-index-sample evaluate-baseline evaluate-trec-bm25-sample compare-metrics-sample split-trec-2021-topics run-trec-2021-bm25 run-trec-2021-fielded-bm25 run-trec-2021-fielded-bm25-candidate compare-trec-2021-bm25 evaluate-trec-2021-lexical-holdout check-retrieval-regression ingest-trec-sample validate-trec-sample write-manifest-sample api ui docker-up docker-down docker-smoke clean
+.PHONY: install install-dev install-ui install-dense test compile ingest-sample ingest-ctgov-sample report-ctgov-sample search-ctgov-sample download-ctgov-small build-trec-corpus-smoke build-bm25-index-sample evaluate-baseline evaluate-trec-bm25-sample compare-metrics-sample split-trec-2021-topics run-trec-2021-bm25 run-trec-2021-fielded-bm25 run-trec-2021-fielded-bm25-candidate compare-trec-2021-bm25 evaluate-trec-2021-lexical-holdout run-trec-2021-dense compare-trec-2021-lexical-dense check-retrieval-regression ingest-trec-sample validate-trec-sample write-manifest-sample api ui docker-up docker-down docker-smoke clean
 
 install:
 	$(PYTHON) -m pip install -e .
@@ -11,6 +11,9 @@ install-dev:
 
 install-ui:
 	$(PYTHON) -m pip install -e ".[ui]"
+
+install-dense:
+	$(PYTHON) -m pip install -e ".[dense]"
 
 test:
 	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m unittest discover -s tests
@@ -128,6 +131,18 @@ compare-trec-2021-bm25:
 evaluate-trec-2021-lexical-holdout:
 	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m clinical_trial_matching.cli run-bm25-experiment \
 		--config configs/experiments/trec_2021/holdout_fielded_bm25_condition_title_v1.json
+
+run-trec-2021-dense:
+	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m clinical_trial_matching.cli run-dense-experiment \
+		--config configs/experiments/trec_2021/development_dense_all_minilm_l6_v2.json
+
+compare-trec-2021-lexical-dense:
+	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m clinical_trial_matching.cli compare-metrics \
+		--metrics frozen_lexical=outputs/trec_2021_development_fielded_bm25_condition_title_v1_metrics.json \
+		--metrics dense_all_minilm=outputs/trec_2021_development_dense_all_minilm_l6_v2_metrics.json \
+		--output outputs/trec_2021_development_lexical_dense_comparison.md \
+		--view eligible_only \
+		--view excluded_or_eligible
 
 check-retrieval-regression:
 	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m clinical_trial_matching.cli check-retrieval-regression \

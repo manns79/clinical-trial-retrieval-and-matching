@@ -11,8 +11,10 @@ from clinical_trial_matching.retrieval.bm25 import (
     DEFAULT_FIELD_WEIGHTS,
     normalized_field_weights,
 )
+from clinical_trial_matching.retrieval.dense import TEXT_REPRESENTATIONS
 
 BM25_EXPERIMENT_SCHEMA_VERSION = 1
+DENSE_EXPERIMENT_SCHEMA_VERSION = 1
 EXPERIMENT_NAME_RE = re.compile(r"[a-z0-9][a-z0-9_.-]*")
 
 
@@ -39,6 +41,37 @@ class Bm25Experiment:
             "name": self.name,
             "description": self.description,
             "schema_version": BM25_EXPERIMENT_SCHEMA_VERSION,
+            "config_path": self.config_label,
+            "config_sha256": self.config_sha256,
+        }
+
+
+@dataclass(frozen=True)
+class DenseExperiment:
+    name: str
+    description: str
+    model_name: str
+    text_representation: str
+    batch_size: int
+    device: str
+    max_seq_length: int | None
+    top_k: int
+    trials_path: Path
+    topics_path: Path
+    qrels_path: Path
+    index_path: Path
+    run_output_path: Path
+    metrics_output_path: Path
+    diagnostics_output_path: Path
+    config_path: Path
+    config_label: str
+    config_sha256: str
+
+    def metadata(self) -> dict[str, str | int]:
+        return {
+            "name": self.name,
+            "description": self.description,
+            "schema_version": DENSE_EXPERIMENT_SCHEMA_VERSION,
             "config_path": self.config_label,
             "config_sha256": self.config_sha256,
         }
@@ -134,6 +167,98 @@ def load_bm25_experiment(path: Path) -> Bm25Experiment:
     )
 
 
+def load_dense_experiment(path: Path) -> DenseExperiment:
+    raw, payload = _read_experiment_json(path, "Dense")
+    allowed_keys = {
+        "schema_version",
+        "name",
+        "description",
+        "project_root",
+        "model_name",
+        "text_representation",
+        "batch_size",
+        "device",
+        "max_seq_length",
+        "benchmark",
+        "artifacts",
+    }
+    unknown_keys = sorted(set(payload) - allowed_keys)
+    if unknown_keys:
+        raise ValueError(f"Unknown dense experiment config field(s): {', '.join(unknown_keys)}")
+
+    schema_version = payload.get("schema_version")
+    if schema_version != DENSE_EXPERIMENT_SCHEMA_VERSION:
+        raise ValueError(
+            "Unsupported dense experiment schema_version "
+            f"{schema_version!r}; expected {DENSE_EXPERIMENT_SCHEMA_VERSION}"
+        )
+
+    name = _validated_experiment_name(payload)
+    description = _required_string(payload, "description")
+    project_root = _project_root(path, payload)
+    model_name = _required_string(payload, "model_name")
+    text_representation = _required_string(payload, "text_representation")
+    if text_representation not in TEXT_REPRESENTATIONS:
+        raise ValueError(
+            f"Unknown dense text representation {text_representation!r}; expected one of "
+            + ", ".join(sorted(TEXT_REPRESENTATIONS))
+        )
+    batch_size = _positive_integer(payload, "batch_size")
+    device = _required_string(payload, "device")
+    max_seq_length_value = payload.get("max_seq_length")
+    if max_seq_length_value is None:
+        max_seq_length = None
+    elif isinstance(max_seq_length_value, bool) or not isinstance(max_seq_length_value, int):
+        raise ValueError("max_seq_length must be a positive integer or null")
+    elif max_seq_length_value < 1:
+        raise ValueError("max_seq_length must be a positive integer or null")
+    else:
+        max_seq_length = max_seq_length_value
+
+    benchmark = _required_mapping(payload, "benchmark")
+    _reject_unknown_fields(benchmark, "benchmark", {"trials", "topics", "qrels", "top_k"})
+    top_k = _positive_integer(benchmark, "top_k", prefix="benchmark.")
+    artifacts = _required_mapping(payload, "artifacts")
+    _reject_unknown_fields(
+        artifacts,
+        "artifacts",
+        {"index", "run", "metrics", "diagnostics"},
+    )
+
+    config_path = path.resolve()
+    try:
+        config_label = config_path.relative_to(project_root).as_posix()
+    except ValueError:
+        config_label = config_path.name
+
+    index_path = _project_path(project_root, artifacts, "index", "artifacts")
+    if index_path.suffix.lower() != ".npz":
+        raise ValueError("artifacts.index must use the .npz suffix")
+
+    return DenseExperiment(
+        name=name,
+        description=description,
+        model_name=model_name,
+        text_representation=text_representation,
+        batch_size=batch_size,
+        device=device,
+        max_seq_length=max_seq_length,
+        top_k=top_k,
+        trials_path=_project_path(project_root, benchmark, "trials", "benchmark"),
+        topics_path=_project_path(project_root, benchmark, "topics", "benchmark"),
+        qrels_path=_project_path(project_root, benchmark, "qrels", "benchmark"),
+        index_path=index_path,
+        run_output_path=_project_path(project_root, artifacts, "run", "artifacts"),
+        metrics_output_path=_project_path(project_root, artifacts, "metrics", "artifacts"),
+        diagnostics_output_path=_project_path(
+            project_root, artifacts, "diagnostics", "artifacts"
+        ),
+        config_path=config_path,
+        config_label=config_label,
+        config_sha256=hashlib.sha256(raw).hexdigest(),
+    )
+
+
 def _field_weights(value: Any, retriever: str) -> dict[str, float]:
     if not isinstance(value, dict):
         raise ValueError("field_weights must be a JSON object")
@@ -158,6 +283,47 @@ def _field_weights(value: Any, retriever: str) -> dict[str, float]:
             + ", ".join(missing_fields)
         )
     return normalized_field_weights(weights)
+
+
+def _read_experiment_json(path: Path, label: str) -> tuple[bytes, dict[str, Any]]:
+    try:
+        raw = path.read_bytes()
+        payload = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Invalid experiment JSON in {path}: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise ValueError(f"{label} experiment config must contain a JSON object")
+    return raw, payload
+
+
+def _validated_experiment_name(payload: dict[str, Any]) -> str:
+    name = _required_string(payload, "name")
+    if EXPERIMENT_NAME_RE.fullmatch(name) is None:
+        raise ValueError(
+            "Experiment name must start with a lowercase letter or digit and contain only "
+            "lowercase letters, digits, dots, underscores, or hyphens"
+        )
+    return name
+
+
+def _project_root(path: Path, payload: dict[str, Any]) -> Path:
+    project_root_value = _required_string(payload, "project_root")
+    project_root_path = Path(project_root_value)
+    if project_root_path.is_absolute():
+        raise ValueError("project_root must be relative to the experiment config")
+    return (path.resolve().parent / project_root_path).resolve()
+
+
+def _positive_integer(
+    payload: dict[str, Any],
+    key: str,
+    *,
+    prefix: str = "",
+) -> int:
+    value = payload.get(key)
+    if not isinstance(value, int) or isinstance(value, bool) or value < 1:
+        raise ValueError(f"{prefix}{key} must be a positive integer")
+    return value
 
 
 def _required_mapping(payload: dict[str, Any], key: str) -> dict[str, Any]:

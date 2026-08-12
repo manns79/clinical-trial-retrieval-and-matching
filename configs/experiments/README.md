@@ -22,3 +22,7 @@ Do not repeatedly compare candidates on holdout metrics.
 The frozen TREC 2021 lexical winner and its aggregate selection evidence are documented in
 `docs/lexical_baseline_selection.md`. Its `holdout_` config is retained for reproducibility,
 but the holdout result must not be used for further field-weight tuning.
+
+Dense specs pin a sentence-transformer model ID, named trial text representation, batch size,
+device, sequence limit, development inputs, and ignored `.npz`/report artifacts. Dense candidates
+also stay on the development partition until one is selected and frozen.

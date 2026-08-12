@@ -210,6 +210,27 @@ The lexical selection rationale, frozen weights, and aggregate holdout result ar
 [`docs/lexical_baseline_selection.md`](docs/lexical_baseline_selection.md). The holdout config is
 kept for reproducibility; its result is not used for further lexical tuning.
 
+Run the first free, local sentence-transformer baseline on development topics:
+
+```bash
+make install-dense
+make run-trec-2021-dense
+make compare-trec-2021-lexical-dense
+
+cat outputs/trec_2021_development_lexical_dense_comparison.md
+```
+
+The first run downloads the public `sentence-transformers/all-MiniLM-L6-v2` model, embeds the
+26,150-trial corpus in batches on CPU, and writes an ignored NumPy `.npz` index. Later runs reuse
+that index after validating its model, text representation, sequence limit, NCT order, embedding
+dimension, and corpus fingerprint. Loading uses `allow_pickle=False`.
+
+The tracked baseline uses `title_summary_conditions`, which labels and concatenates the trial
+title, brief summary, and conditions. Other supported representations are `title`,
+`clinical_core`, and `all_fields`; change the experiment config and use a distinct index/output
+name for an ablation. Dense experiments remain development-only. Do not evaluate dense or hybrid
+candidates on the lexical holdout.
+
 If you built a ClinicalTrials.gov corpus before `brief_summary` was added, re-normalize
 from the ignored raw JSON before benchmarking so summary boosts are populated:
 

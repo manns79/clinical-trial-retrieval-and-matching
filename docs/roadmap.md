@@ -41,6 +41,13 @@ Current TREC ingestion status:
 - Add pgvector or a local vector index.
 - Implement hybrid fusion and latency measurements.
 
+Current dense retrieval status:
+
+- A configurable local sentence-transformer bi-encoder baseline is scaffolded.
+- Batched corpus embeddings persist in a validated NumPy index.
+- Dense TREC evaluation and lexical/dense development comparison commands are scaffolded.
+- Biomedical model and text-representation ablations remain to be evaluated before hybrid fusion.
+
 ## Milestone 4: Reranking
 
 - Add a biomedical cross-encoder over top candidates.

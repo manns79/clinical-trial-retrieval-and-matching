@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "name": "trec_2021_development_dense_all_minilm_l6_v2",
+  "description": "Free local sentence-transformer baseline over concise trial title, summary, and condition text.",
+  "project_root": "../../..",
+  "model_name": "sentence-transformers/all-MiniLM-L6-v2",
+  "text_representation": "title_summary_conditions",
+  "batch_size": 64,
+  "device": "cpu",
+  "max_seq_length": 256,
+  "benchmark": {
+    "trials": "data/processed/clinicaltrials/trec_2021_qrels_trials.jsonl",
+    "topics": "data/processed/trec/2021/splits/development/topics.jsonl",
+    "qrels": "data/processed/trec/2021/splits/development/qrels.jsonl",
+    "top_k": 100
+  },
+  "artifacts": {
+    "index": "data/indexes/trec_2021_dense_all_minilm_l6_v2_title_summary_conditions.npz",
+    "run": "outputs/trec_2021_development_dense_all_minilm_l6_v2.run",
+    "metrics": "outputs/trec_2021_development_dense_all_minilm_l6_v2_metrics.json",
+    "diagnostics": "outputs/trec_2021_development_dense_all_minilm_l6_v2_diagnostics.json"
+  }
+}

@@ -14,6 +14,7 @@ from clinical_trial_matching.retrieval.bm25 import (
     load_or_build_bm25_retriever,
     normalized_field_weights,
 )
+from clinical_trial_matching.retrieval.dense import DenseRetriever
 
 
 @dataclass(frozen=True)
@@ -77,6 +78,36 @@ def build_bm25_trec_run(
     return rows
 
 
+def build_dense_trec_run(
+    *,
+    retriever: DenseRetriever,
+    topics: Iterable[Topic],
+    run_name: str,
+    top_k: int = 100,
+) -> list[TrecRunRow]:
+    if top_k < 1:
+        raise ValueError("Top-K must be at least 1")
+    if not run_name.strip():
+        raise ValueError("Run name cannot be empty")
+
+    topic_list = list(topics)
+    rankings = retriever.search_many(
+        [topic.text for topic in topic_list],
+        top_k=top_k,
+    )
+    return [
+        TrecRunRow(
+            topic_id=topic.topic_id,
+            nct_id=result.nct_id,
+            rank=result.rank,
+            score=result.score,
+            run_name=run_name,
+        )
+        for topic, results in zip(topic_list, rankings, strict=True)
+        for result in results
+    ]
+
+
 def write_trec_run(path: Path, rows: Iterable[TrecRunRow]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as handle:
@@ -88,7 +119,10 @@ def evaluate_trec_run(rows: Iterable[TrecRunRow], qrels: list[Qrel]) -> dict[str
     return summarize_run(_rows_to_run(rows), qrels_to_mapping(qrels))
 
 
-def evaluate_trec_binary_views(rows: Iterable[TrecRunRow], qrels: list[Qrel]) -> dict[str, dict[str, float]]:
+def evaluate_trec_binary_views(
+    rows: Iterable[TrecRunRow],
+    qrels: list[Qrel],
+) -> dict[str, dict[str, float]]:
     run = _rows_to_run(rows)
     qrels_mapping = qrels_to_mapping(qrels)
     return {
@@ -106,6 +140,29 @@ def bm25_trec_evaluation_report(
     topics_count: int,
     trials_count: int,
     retriever_name: str = "bm25",
+    retriever_parameters: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    return trec_evaluation_report(
+        rows=rows,
+        qrels=qrels,
+        run_name=run_name,
+        top_k=top_k,
+        topics_count=topics_count,
+        trials_count=trials_count,
+        retriever_name=retriever_name,
+        retriever_parameters=retriever_parameters,
+    )
+
+
+def trec_evaluation_report(
+    *,
+    rows: list[TrecRunRow],
+    qrels: list[Qrel],
+    run_name: str,
+    top_k: int,
+    topics_count: int,
+    trials_count: int,
+    retriever_name: str,
     retriever_parameters: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     topic_ids_with_results = {row.topic_id for row in rows}
@@ -133,6 +190,29 @@ def bm25_trec_topic_diagnostics(
     top_k: int,
     weak_recall_threshold: float = 0.05,
     retriever_name: str = "bm25",
+    retriever_parameters: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    return trec_topic_diagnostics(
+        rows=rows,
+        qrels=qrels,
+        topics=topics,
+        run_name=run_name,
+        top_k=top_k,
+        weak_recall_threshold=weak_recall_threshold,
+        retriever_name=retriever_name,
+        retriever_parameters=retriever_parameters,
+    )
+
+
+def trec_topic_diagnostics(
+    *,
+    rows: list[TrecRunRow],
+    qrels: list[Qrel],
+    topics: list[Topic],
+    run_name: str,
+    top_k: int,
+    retriever_name: str,
+    weak_recall_threshold: float = 0.05,
     retriever_parameters: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     run = _rows_to_run(rows)

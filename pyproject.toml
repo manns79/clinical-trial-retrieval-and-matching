@@ -25,6 +25,10 @@ dependencies = [
 ui = [
   "streamlit>=1.37",
 ]
+dense = [
+  "sentence-transformers>=3.0",
+  "numpy>=1.26",
+]
 ml = [
   "sentence-transformers>=3.0",
   "numpy>=1.26",
