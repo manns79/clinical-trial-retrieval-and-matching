@@ -206,6 +206,10 @@ This project inspected full TREC 2021 metrics before introducing the split, so t
 is a workflow guardrail rather than a claim of a historically unseen test set. A later TREC year
 should provide the stronger external evaluation.
 
+The lexical selection rationale, frozen weights, and aggregate holdout result are recorded in
+[`docs/lexical_baseline_selection.md`](docs/lexical_baseline_selection.md). The holdout config is
+kept for reproducibility; its result is not used for further lexical tuning.
+
 If you built a ClinicalTrials.gov corpus before `brief_summary` was added, re-normalize
 from the ignored raw JSON before benchmarking so summary boosts are populated:
 

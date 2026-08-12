@@ -18,3 +18,7 @@ contain patient data, secrets, tokens, or copied benchmark records.
 The TREC 2021 tuning specs read only the deterministic development partition. Choose a profile
 from development metrics, freeze it, and then create one holdout spec for final evaluation.
 Do not repeatedly compare candidates on holdout metrics.
+
+The frozen TREC 2021 lexical winner and its aggregate selection evidence are documented in
+`docs/lexical_baseline_selection.md`. Its `holdout_` config is retained for reproducibility,
+but the holdout result must not be used for further field-weight tuning.

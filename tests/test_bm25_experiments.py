@@ -12,6 +12,25 @@ from clinical_trial_matching.retrieval.bm25 import DEFAULT_FIELD_WEIGHTS
 
 
 class Bm25ExperimentTest(unittest.TestCase):
+    def test_frozen_holdout_weights_match_selected_development_profile(self) -> None:
+        development = load_bm25_experiment(
+            Path(
+                "configs/experiments/trec_2021/"
+                "fielded_bm25_condition_title_v1.json"
+            )
+        )
+        holdout = load_bm25_experiment(
+            Path(
+                "configs/experiments/trec_2021/"
+                "holdout_fielded_bm25_condition_title_v1.json"
+            )
+        )
+
+        self.assertEqual(holdout.field_weights, development.field_weights)
+        self.assertIn("/development/", development.topics_path.as_posix())
+        self.assertIn("/holdout/", holdout.topics_path.as_posix())
+        self.assertEqual(holdout.index_path, development.index_path)
+
     def test_load_experiment_resolves_paths_and_pins_weights(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
