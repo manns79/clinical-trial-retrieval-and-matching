@@ -78,6 +78,42 @@ class DenseRetrieverTest(unittest.TestCase):
         self.assertIn("Conditions: Asthma", text)
         self.assertNotIn("Eligibility Criteria", text)
 
+    def test_clinical_core_prioritizes_matching_fields_before_summary(self) -> None:
+        text = trial_text(
+            Trial(
+                nct_id="NCT1",
+                title="Study",
+                brief_summary="Summary",
+                conditions=("Asthma",),
+                interventions=("Inhaler",),
+                eligibility_criteria="Adults with persistent symptoms",
+                sex="ALL",
+                minimum_age="18 Years",
+            ),
+            "clinical_core",
+        )
+
+        self.assertLess(text.index("Conditions:"), text.index("Eligibility Criteria:"))
+        self.assertLess(text.index("Eligibility Criteria:"), text.index("Brief Summary:"))
+
+    def test_eligibility_snapshot_excludes_summary_and_interventions(self) -> None:
+        text = trial_text(
+            Trial(
+                nct_id="NCT1",
+                title="Study",
+                brief_summary="Summary",
+                conditions=("Asthma",),
+                interventions=("Inhaler",),
+                eligibility_criteria="Adults with persistent symptoms",
+                minimum_age="18 Years",
+            ),
+            "eligibility_snapshot",
+        )
+
+        self.assertIn("Eligibility Criteria:", text)
+        self.assertNotIn("Brief Summary:", text)
+        self.assertNotIn("Interventions:", text)
+
     def test_build_and_search_normalizes_embeddings_and_batches_queries(self) -> None:
         encoder = FakeEncoder()
         index = build_dense_index(

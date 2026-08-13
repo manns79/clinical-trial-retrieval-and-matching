@@ -1,7 +1,7 @@
-# BM25 experiment registry
+# Retrieval experiment registry
 
-Each JSON file in this directory is a versioned, reviewable BM25 experiment specification.
-The config pins the retriever, every field weight, benchmark inputs, and ignored artifact paths.
+Each JSON file in this directory is a versioned, reviewable retrieval experiment specification.
+The config pins the retriever or fusion method, benchmark inputs, and ignored artifact paths.
 Paths are resolved from `project_root`, which is relative to the config file.
 
 Run one experiment from any working directory:
@@ -26,3 +26,8 @@ but the holdout result must not be used for further field-weight tuning.
 Dense specs pin a sentence-transformer model ID, named trial text representation, batch size,
 device, sequence limit, development inputs, and ignored `.npz`/report artifacts. Dense candidates
 also stay on the development partition until one is selected and frozen.
+
+RRF specs pin named component run files, component weights, the RRF constant and candidate depth,
+benchmark inputs, and ignored output paths. The selected dense profile and hybrid development
+evidence are documented in `docs/dense_hybrid_selection.md`. Dense and hybrid candidates must not
+be evaluated on the lexical holdout while they are still being selected.

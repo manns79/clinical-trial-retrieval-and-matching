@@ -26,6 +26,20 @@ class DenseExperimentTest(unittest.TestCase):
         self.assertNotIn("/holdout/", experiment.topics_path.as_posix())
         self.assertEqual(experiment.index_path.suffix, ".npz")
 
+    def test_biomedical_ablation_is_development_only(self) -> None:
+        experiment = load_dense_experiment(
+            Path(
+                "configs/experiments/trec_2021/"
+                "development_dense_medembed_small_eligibility_snapshot.json"
+            )
+        )
+
+        self.assertEqual(experiment.model_name, "abhinand/MedEmbed-small-v0.1")
+        self.assertEqual(experiment.text_representation, "eligibility_snapshot")
+        self.assertEqual(experiment.max_seq_length, 64)
+        self.assertIn("/development/", experiment.topics_path.as_posix())
+        self.assertNotIn("/holdout/", experiment.topics_path.as_posix())
+
     def test_loader_rejects_unknown_text_representation(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             config_path = Path(tmpdir) / "dense.json"

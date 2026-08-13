@@ -1,7 +1,7 @@
 PYTHON ?= python3
 PYTHONPATH ?= src
 
-.PHONY: install install-dev install-ui install-dense test compile ingest-sample ingest-ctgov-sample report-ctgov-sample search-ctgov-sample download-ctgov-small build-trec-corpus-smoke build-bm25-index-sample evaluate-baseline evaluate-trec-bm25-sample compare-metrics-sample split-trec-2021-topics run-trec-2021-bm25 run-trec-2021-fielded-bm25 run-trec-2021-fielded-bm25-candidate compare-trec-2021-bm25 evaluate-trec-2021-lexical-holdout run-trec-2021-dense compare-trec-2021-lexical-dense check-retrieval-regression ingest-trec-sample validate-trec-sample write-manifest-sample api ui docker-up docker-down docker-smoke clean
+.PHONY: install install-dev install-ui install-dense test compile ingest-sample ingest-ctgov-sample report-ctgov-sample search-ctgov-sample download-ctgov-small build-trec-corpus-smoke build-bm25-index-sample evaluate-baseline evaluate-trec-bm25-sample compare-metrics-sample split-trec-2021-topics run-trec-2021-bm25 run-trec-2021-fielded-bm25 run-trec-2021-fielded-bm25-candidate compare-trec-2021-bm25 evaluate-trec-2021-lexical-holdout run-trec-2021-dense run-trec-2021-dense-biomedical compare-trec-2021-dense-ablation compare-trec-2021-lexical-dense run-trec-2021-hybrid compare-trec-2021-retrievers check-retrieval-regression ingest-trec-sample validate-trec-sample write-manifest-sample api ui docker-up docker-down docker-smoke clean
 
 install:
 	$(PYTHON) -m pip install -e .
@@ -136,11 +136,36 @@ run-trec-2021-dense:
 	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m clinical_trial_matching.cli run-dense-experiment \
 		--config configs/experiments/trec_2021/development_dense_all_minilm_l6_v2.json
 
+run-trec-2021-dense-biomedical:
+	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m clinical_trial_matching.cli run-dense-experiment \
+		--config configs/experiments/trec_2021/development_dense_medembed_small_eligibility_snapshot.json
+
+compare-trec-2021-dense-ablation:
+	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m clinical_trial_matching.cli compare-metrics \
+		--metrics all_minilm=outputs/trec_2021_development_dense_all_minilm_l6_v2_metrics.json \
+		--metrics medembed_eligibility=outputs/trec_2021_development_dense_medembed_small_eligibility_snapshot_metrics.json \
+		--output outputs/trec_2021_development_dense_ablation_comparison.md \
+		--view eligible_only \
+		--view excluded_or_eligible
+
 compare-trec-2021-lexical-dense:
 	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m clinical_trial_matching.cli compare-metrics \
 		--metrics frozen_lexical=outputs/trec_2021_development_fielded_bm25_condition_title_v1_metrics.json \
 		--metrics dense_all_minilm=outputs/trec_2021_development_dense_all_minilm_l6_v2_metrics.json \
 		--output outputs/trec_2021_development_lexical_dense_comparison.md \
+		--view eligible_only \
+		--view excluded_or_eligible
+
+run-trec-2021-hybrid:
+	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m clinical_trial_matching.cli run-rrf-experiment \
+		--config configs/experiments/trec_2021/development_hybrid_rrf_lexical_minilm.json
+
+compare-trec-2021-retrievers:
+	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m clinical_trial_matching.cli compare-metrics \
+		--metrics frozen_lexical=outputs/trec_2021_development_fielded_bm25_condition_title_v1_metrics.json \
+		--metrics selected_dense=outputs/trec_2021_development_dense_all_minilm_l6_v2_metrics.json \
+		--metrics hybrid_rrf=outputs/trec_2021_development_hybrid_rrf_lexical_minilm_metrics.json \
+		--output outputs/trec_2021_development_retriever_comparison.md \
 		--view eligible_only \
 		--view excluded_or_eligible
 

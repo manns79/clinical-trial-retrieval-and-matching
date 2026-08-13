@@ -15,6 +15,7 @@ from clinical_trial_matching.retrieval.dense import TEXT_REPRESENTATIONS
 
 BM25_EXPERIMENT_SCHEMA_VERSION = 1
 DENSE_EXPERIMENT_SCHEMA_VERSION = 1
+RRF_EXPERIMENT_SCHEMA_VERSION = 1
 EXPERIMENT_NAME_RE = re.compile(r"[a-z0-9][a-z0-9_.-]*")
 
 
@@ -72,6 +73,41 @@ class DenseExperiment:
             "name": self.name,
             "description": self.description,
             "schema_version": DENSE_EXPERIMENT_SCHEMA_VERSION,
+            "config_path": self.config_label,
+            "config_sha256": self.config_sha256,
+        }
+
+
+@dataclass(frozen=True)
+class RrfComponent:
+    name: str
+    run_path: Path
+    weight: float
+
+
+@dataclass(frozen=True)
+class RrfExperiment:
+    name: str
+    description: str
+    rrf_k: int
+    candidate_depth: int
+    top_k: int
+    components: tuple[RrfComponent, ...]
+    trials_path: Path
+    topics_path: Path
+    qrels_path: Path
+    run_output_path: Path
+    metrics_output_path: Path
+    diagnostics_output_path: Path
+    config_path: Path
+    config_label: str
+    config_sha256: str
+
+    def metadata(self) -> dict[str, str | int]:
+        return {
+            "name": self.name,
+            "description": self.description,
+            "schema_version": RRF_EXPERIMENT_SCHEMA_VERSION,
             "config_path": self.config_label,
             "config_sha256": self.config_sha256,
         }
@@ -248,6 +284,86 @@ def load_dense_experiment(path: Path) -> DenseExperiment:
         topics_path=_project_path(project_root, benchmark, "topics", "benchmark"),
         qrels_path=_project_path(project_root, benchmark, "qrels", "benchmark"),
         index_path=index_path,
+        run_output_path=_project_path(project_root, artifacts, "run", "artifacts"),
+        metrics_output_path=_project_path(project_root, artifacts, "metrics", "artifacts"),
+        diagnostics_output_path=_project_path(
+            project_root, artifacts, "diagnostics", "artifacts"
+        ),
+        config_path=config_path,
+        config_label=config_label,
+        config_sha256=hashlib.sha256(raw).hexdigest(),
+    )
+
+
+def load_rrf_experiment(path: Path) -> RrfExperiment:
+    raw, payload = _read_experiment_json(path, "RRF")
+    allowed_keys = {
+        "schema_version",
+        "name",
+        "description",
+        "project_root",
+        "rrf_k",
+        "candidate_depth",
+        "components",
+        "benchmark",
+        "artifacts",
+    }
+    unknown_keys = sorted(set(payload) - allowed_keys)
+    if unknown_keys:
+        raise ValueError(f"Unknown RRF experiment config field(s): {', '.join(unknown_keys)}")
+    if payload.get("schema_version") != RRF_EXPERIMENT_SCHEMA_VERSION:
+        raise ValueError(
+            "Unsupported RRF experiment schema_version "
+            f"{payload.get('schema_version')!r}; expected {RRF_EXPERIMENT_SCHEMA_VERSION}"
+        )
+
+    name = _validated_experiment_name(payload)
+    description = _required_string(payload, "description")
+    project_root = _project_root(path, payload)
+    rrf_k = _positive_integer(payload, "rrf_k")
+    candidate_depth = _positive_integer(payload, "candidate_depth")
+    raw_components = payload.get("components")
+    if not isinstance(raw_components, list) or len(raw_components) < 2:
+        raise ValueError("components must contain at least two RRF component objects")
+    components: list[RrfComponent] = []
+    for index, raw_component in enumerate(raw_components):
+        if not isinstance(raw_component, dict):
+            raise ValueError(f"components[{index}] must be a JSON object")
+        _reject_unknown_fields(raw_component, f"components[{index}]", {"name", "run", "weight"})
+        component_name = _required_string(raw_component, "name")
+        weight = raw_component.get("weight")
+        if not isinstance(weight, (int, float)) or isinstance(weight, bool) or weight <= 0:
+            raise ValueError(f"components[{index}].weight must be positive")
+        components.append(
+            RrfComponent(
+                name=component_name,
+                run_path=_project_path(project_root, raw_component, "run", f"components[{index}]"),
+                weight=float(weight),
+            )
+        )
+    if len({component.name for component in components}) != len(components):
+        raise ValueError("RRF component names must be unique")
+
+    benchmark = _required_mapping(payload, "benchmark")
+    _reject_unknown_fields(benchmark, "benchmark", {"trials", "topics", "qrels", "top_k"})
+    artifacts = _required_mapping(payload, "artifacts")
+    _reject_unknown_fields(artifacts, "artifacts", {"run", "metrics", "diagnostics"})
+    config_path = path.resolve()
+    try:
+        config_label = config_path.relative_to(project_root).as_posix()
+    except ValueError:
+        config_label = config_path.name
+
+    return RrfExperiment(
+        name=name,
+        description=description,
+        rrf_k=rrf_k,
+        candidate_depth=candidate_depth,
+        top_k=_positive_integer(benchmark, "top_k", prefix="benchmark."),
+        components=tuple(components),
+        trials_path=_project_path(project_root, benchmark, "trials", "benchmark"),
+        topics_path=_project_path(project_root, benchmark, "topics", "benchmark"),
+        qrels_path=_project_path(project_root, benchmark, "qrels", "benchmark"),
         run_output_path=_project_path(project_root, artifacts, "run", "artifacts"),
         metrics_output_path=_project_path(project_root, artifacts, "metrics", "artifacts"),
         diagnostics_output_path=_project_path(

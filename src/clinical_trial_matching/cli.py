@@ -12,6 +12,7 @@ from clinical_trial_matching.evaluation.comparison import (
 from clinical_trial_matching.evaluation.experiments import (
     load_bm25_experiment,
     load_dense_experiment,
+    load_rrf_experiment,
 )
 from clinical_trial_matching.evaluation.metrics import summarize_run
 from clinical_trial_matching.evaluation.regression import (
@@ -70,6 +71,12 @@ from clinical_trial_matching.retrieval.dense import (
     build_dense_index,
     load_or_build_dense_retriever,
     save_dense_index,
+)
+from clinical_trial_matching.retrieval.hybrid import (
+    RRF_RETRIEVER_NAME,
+    RankedRun,
+    read_trec_rankings,
+    reciprocal_rank_fusion,
 )
 from clinical_trial_matching.validation.trials import summarize_trial_corpus
 
@@ -258,6 +265,12 @@ def main() -> None:
     )
     dense_experiment.add_argument("--config", type=Path, required=True)
     dense_experiment.add_argument("--rebuild-index", action="store_true")
+
+    rrf_experiment = subparsers.add_parser(
+        "run-rrf-experiment",
+        help="Fuse existing TREC runs with reciprocal-rank fusion and evaluate the result.",
+    )
+    rrf_experiment.add_argument("--config", type=Path, required=True)
 
     compare_metrics_parser = subparsers.add_parser(
         "compare-metrics",
@@ -450,6 +463,8 @@ def main() -> None:
         )
     elif args.command == "run-dense-experiment":
         run_dense_experiment(args.config, rebuild_index=args.rebuild_index)
+    elif args.command == "run-rrf-experiment":
+        run_rrf_experiment(args.config)
     elif args.command == "compare-metrics":
         compare_metrics(
             metrics_specs=args.metrics,
@@ -1034,6 +1049,78 @@ def run_dense_experiment(config_path: Path, *, rebuild_index: bool = False) -> N
         rebuild_index=rebuild_index,
         experiment_metadata=experiment.metadata(),
     )
+
+
+def run_rrf_experiment(config_path: Path) -> None:
+    experiment = load_rrf_experiment(config_path)
+    topics = [topic_from_json_record(row) for row in read_jsonl(experiment.topics_path)]
+    qrels = read_qrels_records(experiment.qrels_path)
+    trials_count = len(read_jsonl(experiment.trials_path))
+    runs = [
+        RankedRun(
+            name=component.name,
+            weight=component.weight,
+            rankings=read_trec_rankings(component.run_path),
+        )
+        for component in experiment.components
+    ]
+    expected_topic_ids = {topic.topic_id for topic in topics}
+    for run in runs:
+        actual_topic_ids = set(run.rankings)
+        if actual_topic_ids != expected_topic_ids:
+            missing = sorted(expected_topic_ids - actual_topic_ids)
+            extra = sorted(actual_topic_ids - expected_topic_ids)
+            raise ValueError(
+                f"RRF component {run.name!r} does not match benchmark topics; "
+                f"missing={missing}, extra={extra}"
+            )
+    rows = reciprocal_rank_fusion(
+        runs,
+        run_name=experiment.name,
+        rrf_k=experiment.rrf_k,
+        top_k=experiment.top_k,
+        candidate_depth=experiment.candidate_depth,
+    )
+    write_trec_run(experiment.run_output_path, rows)
+    parameters = {
+        "rrf_k": experiment.rrf_k,
+        "candidate_depth": experiment.candidate_depth,
+        "components": [
+            {
+                "name": component.name,
+                "weight": component.weight,
+                "run_path": str(component.run_path),
+                "run_sha256": sha256_file(component.run_path),
+            }
+            for component in experiment.components
+        ],
+    }
+    report = trec_evaluation_report(
+        rows=rows,
+        qrels=qrels,
+        run_name=experiment.name,
+        top_k=experiment.top_k,
+        topics_count=len(topics),
+        trials_count=trials_count,
+        retriever_name=RRF_RETRIEVER_NAME,
+        retriever_parameters=parameters,
+    )
+    report["experiment"] = experiment.metadata()
+    write_json(experiment.metrics_output_path, report)
+    diagnostics = trec_topic_diagnostics(
+        rows=rows,
+        qrels=qrels,
+        topics=topics,
+        run_name=experiment.name,
+        top_k=experiment.top_k,
+        retriever_name=RRF_RETRIEVER_NAME,
+        retriever_parameters=parameters,
+    )
+    diagnostics["experiment"] = experiment.metadata()
+    write_json(experiment.diagnostics_output_path, diagnostics)
+    print(f"Wrote TREC RRF run file to {experiment.run_output_path}")
+    print(f"Wrote TREC RRF metrics report to {experiment.metrics_output_path}")
+    print(f"Wrote TREC RRF topic diagnostics to {experiment.diagnostics_output_path}")
 
 
 def compare_metrics(

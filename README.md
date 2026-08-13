@@ -215,9 +215,14 @@ Run the first free, local sentence-transformer baseline on development topics:
 ```bash
 make install-dense
 make run-trec-2021-dense
+make run-trec-2021-dense-biomedical
+make compare-trec-2021-dense-ablation
 make compare-trec-2021-lexical-dense
+make run-trec-2021-hybrid
+make compare-trec-2021-retrievers
 
-cat outputs/trec_2021_development_lexical_dense_comparison.md
+cat outputs/trec_2021_development_dense_ablation_comparison.md
+cat outputs/trec_2021_development_retriever_comparison.md
 ```
 
 The first run downloads the public `sentence-transformers/all-MiniLM-L6-v2` model, embeds the
@@ -225,11 +230,17 @@ The first run downloads the public `sentence-transformers/all-MiniLM-L6-v2` mode
 that index after validating its model, text representation, sequence limit, NCT order, embedding
 dimension, and corpus fingerprint. Loading uses `allow_pickle=False`.
 
-The tracked baseline uses `title_summary_conditions`, which labels and concatenates the trial
-title, brief summary, and conditions. Other supported representations are `title`,
-`clinical_core`, and `all_fields`; change the experiment config and use a distinct index/output
-name for an ablation. Dense experiments remain development-only. Do not evaluate dense or hybrid
+The selected dense profile uses `title_summary_conditions`, which labels and concatenates the
+trial title, brief summary, and conditions. The tracked biomedical ablation combines
+`abhinand/MedEmbed-small-v0.1` with an `eligibility_snapshot` representation. Other supported
+representations are `title`, `clinical_core`, and `all_fields`; use a distinct index/output name
+for each ablation. Dense experiments remain development-only. Do not evaluate dense or hybrid
 candidates on the lexical holdout.
+
+The hybrid experiment performs deterministic, equal-weight reciprocal-rank fusion over the
+frozen lexical and selected dense development run files. Its metrics report includes component
+paths, weights, and run checksums for traceability. The aggregate dense selection and RRF results
+are recorded in [`docs/dense_hybrid_selection.md`](docs/dense_hybrid_selection.md).
 
 If you built a ClinicalTrials.gov corpus before `brief_summary` was added, re-normalize
 from the ignored raw JSON before benchmarking so summary boosts are populated:

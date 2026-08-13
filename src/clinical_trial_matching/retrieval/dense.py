@@ -17,13 +17,19 @@ DENSE_RETRIEVER_NAME = "dense-bi-encoder"
 TEXT_REPRESENTATIONS = {
     "title": ("title",),
     "title_summary_conditions": ("title", "brief_summary", "conditions"),
+    "eligibility_snapshot": (
+        "title",
+        "conditions",
+        "demographics",
+        "eligibility_criteria",
+    ),
     "clinical_core": (
         "title",
-        "brief_summary",
         "conditions",
-        "interventions",
-        "eligibility_criteria",
         "demographics",
+        "eligibility_criteria",
+        "interventions",
+        "brief_summary",
     ),
     "all_fields": (
         "title",
