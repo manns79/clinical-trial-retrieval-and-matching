@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from clinical_trial_matching.evaluation.trec import TrecRunRow
+from clinical_trial_matching.models import SearchResult
 
 RRF_RETRIEVER_NAME = "reciprocal-rank-fusion"
 
@@ -14,6 +15,65 @@ class RankedRun:
     name: str
     weight: float
     rankings: dict[str, tuple[str, ...]]
+
+
+@dataclass(frozen=True)
+class RankedResults:
+    name: str
+    weight: float
+    results: tuple[SearchResult, ...]
+
+
+@dataclass(frozen=True)
+class FusedResults:
+    results: tuple[SearchResult, ...]
+    component_ranks: dict[str, dict[str, int]]
+
+
+def reciprocal_rank_fuse_results(
+    runs: list[RankedResults],
+    *,
+    rrf_k: int = 60,
+    top_k: int = 10,
+    candidate_depth: int = 100,
+) -> FusedResults:
+    if len(runs) < 2:
+        raise ValueError("Reciprocal-rank fusion requires at least two component rankings")
+    if rrf_k < 1 or top_k < 1 or candidate_depth < 1:
+        raise ValueError("RRF k, top-k, and candidate depth must be positive")
+    if any(run.weight <= 0 for run in runs):
+        raise ValueError("RRF component weights must be positive")
+    if len({run.name for run in runs}) != len(runs):
+        raise ValueError("RRF component names must be unique")
+
+    scores: dict[str, float] = defaultdict(float)
+    best_ranks: dict[str, int] = {}
+    titles: dict[str, str] = {}
+    component_ranks: dict[str, dict[str, int]] = defaultdict(dict)
+    for run in runs:
+        for rank, result in enumerate(run.results[:candidate_depth], start=1):
+            scores[result.nct_id] += run.weight / (rrf_k + rank)
+            best_ranks[result.nct_id] = min(best_ranks.get(result.nct_id, rank), rank)
+            titles[result.nct_id] = result.title
+            component_ranks[result.nct_id][run.name] = rank
+
+    ranked_ids = sorted(
+        scores,
+        key=lambda nct_id: (-scores[nct_id], best_ranks[nct_id], nct_id),
+    )[:top_k]
+    results = tuple(
+        SearchResult(
+            nct_id=nct_id,
+            score=scores[nct_id],
+            rank=rank,
+            title=titles[nct_id],
+        )
+        for rank, nct_id in enumerate(ranked_ids, start=1)
+    )
+    return FusedResults(
+        results=results,
+        component_ranks={nct_id: component_ranks[nct_id] for nct_id in ranked_ids},
+    )
 
 
 def read_trec_rankings(path: Path) -> dict[str, tuple[str, ...]]:

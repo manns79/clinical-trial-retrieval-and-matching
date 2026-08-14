@@ -31,11 +31,14 @@ def main() -> None:
     st.caption("Research demo only. Not medical advice or an eligibility determination.")
 
     api_base_url = sidebar_controls()
-    render_health(api_base_url)
+    health = render_health(api_base_url)
 
     query = st.text_area(
         "Patient summary",
-        value="Adult with persistent asthma and wheezing interested in an inhaled corticosteroid trial.",
+        value=(
+            "Adult with persistent asthma and wheezing interested in an inhaled "
+            "corticosteroid trial."
+        ),
         height=120,
     )
 
@@ -43,7 +46,12 @@ def main() -> None:
     with col_top_k:
         top_k = st.slider("Results", min_value=1, max_value=25, value=10)
     with col_retriever:
-        retriever = st.selectbox("Retriever", options=["fielded-bm25", "bm25"], index=0)
+        retriever = st.selectbox(
+            "Retriever",
+            options=available_retrievers(health),
+            format_func=retriever_label,
+            index=0,
+        )
     with col_button:
         st.write("")
         st.write("")
@@ -67,15 +75,15 @@ def sidebar_controls() -> str:
             "API base URL",
             value=os.getenv("API_BASE_URL", DEFAULT_API_BASE_URL),
         )
-    return api_base_url
+    return str(api_base_url)
 
 
-def render_health(api_base_url: str) -> None:
+def render_health(api_base_url: str) -> dict[str, Any] | None:
     try:
         health = get_api_health(api_base_url=api_base_url)
     except Exception as exc:
         st.warning(f"API unavailable: {exc}")
-        return
+        return None
 
     checks = health.get("checks", {})
     corpus_exists = checks.get("trial_corpus_exists")
@@ -85,6 +93,30 @@ def render_health(api_base_url: str) -> None:
         f"Corpus: {status_label} | "
         f"Path: {health.get('trial_corpus_path', 'unknown')}"
     )
+    return dict(health)
+
+
+def available_retrievers(health: dict[str, Any] | None) -> list[str]:
+    if not health:
+        return ["fielded-bm25", "bm25"]
+    values = health.get("available_retrievers")
+    if not isinstance(values, list):
+        return ["fielded-bm25", "bm25"]
+    supported = [
+        value
+        for value in values
+        if value in {"fielded-bm25", "bm25", "dense", "hybrid"}
+    ]
+    return supported or ["fielded-bm25", "bm25"]
+
+
+def retriever_label(retriever: str) -> str:
+    return {
+        "fielded-bm25": "Fielded BM25",
+        "bm25": "Plain BM25",
+        "dense": "Dense bi-encoder",
+        "hybrid": "Hybrid RRF",
+    }.get(retriever, retriever)
 
 
 def run_search(*, api_base_url: str, query: str, top_k: int, retriever: str) -> None:
@@ -117,6 +149,7 @@ def render_search_results(payload: dict[str, Any]) -> None:
         f"({corpus.get('unique_nct_ids', 0)} unique NCT IDs) | "
         f"Retriever: {payload.get('retriever', 'unknown')}"
     )
+    render_latency(payload.get("latency_ms", {}))
 
     if not results:
         st.info("No matching trials returned.")
@@ -146,10 +179,29 @@ def render_result(result: dict[str, Any]) -> None:
         matched_terms = result.get("matched_terms", [])
         if matched_terms:
             st.caption("Matched terms: " + ", ".join(str(term) for term in matched_terms))
+        component_ranks = result.get("component_ranks", {})
+        if component_ranks:
+            rank_text = " | ".join(
+                f"{retriever_label(str(name))}: #{rank}"
+                for name, rank in component_ranks.items()
+            )
+            st.caption(rank_text)
         conditions = ", ".join(result.get("conditions", []))
         interventions = ", ".join(result.get("interventions", []))
         st.caption(f"Conditions: {conditions or 'none'}")
         st.caption(f"Interventions: {interventions or 'none'}")
+
+
+def render_latency(latency: dict[str, Any]) -> None:
+    columns = st.columns(4)
+    values = (
+        ("Total", latency.get("total", 0)),
+        ("Lexical", latency.get("lexical", 0)),
+        ("Embedding", latency.get("embedding", 0)),
+        ("Fusion", latency.get("fusion", 0)),
+    )
+    for column, (label, value) in zip(columns, values, strict=True):
+        column.metric(label, f"{float(value):.1f} ms")
 
 
 def render_trial_detail(api_base_url: str, nct_id: str) -> None:

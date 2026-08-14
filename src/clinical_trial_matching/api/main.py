@@ -1,10 +1,12 @@
 from __future__ import annotations
 
-import os
 import logging
+import os
+from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from pydantic import BaseModel, Field
 
@@ -15,7 +17,17 @@ from clinical_trial_matching.ingestion.clinicaltrials import (
 from clinical_trial_matching.io import read_jsonl
 from clinical_trial_matching.models import Trial
 from clinical_trial_matching.observability import configure_logging, elapsed_ms, log_event, now_ms
-from clinical_trial_matching.retrieval.bm25 import load_or_build_bm25_retriever, search_trials
+from clinical_trial_matching.retrieval.bm25 import (
+    QUERY_STOPWORDS,
+    format_search_results,
+    load_or_build_bm25_retriever,
+    normalized_field_weights,
+)
+from clinical_trial_matching.retrieval.dense import load_or_build_dense_retriever
+from clinical_trial_matching.retrieval.hybrid import (
+    RankedResults,
+    reciprocal_rank_fuse_results,
+)
 
 try:
     from fastapi import FastAPI, HTTPException, Request, Response
@@ -23,16 +35,44 @@ except ImportError as exc:  # pragma: no cover - import-time developer guidance
     raise RuntimeError("Install API dependencies with `python3 -m pip install -e .`.") from exc
 
 DEFAULT_TRIAL_CORPUS_PATH = "data/processed/clinicaltrials/studies.sample.jsonl"
+DEFAULT_DENSE_MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
+DEFAULT_DENSE_TEXT_REPRESENTATION = "title_summary_conditions"
+DEFAULT_DENSE_BATCH_SIZE = 64
+DEFAULT_DENSE_DEVICE = "cpu"
+DEFAULT_DENSE_MAX_SEQ_LENGTH = 256
+DEFAULT_RRF_K = 60
+DEFAULT_RRF_CANDIDATE_DEPTH = 100
+SERVING_FIELD_WEIGHTS = {
+    "all_text": 1.0,
+    "title": 1.25,
+    "brief_summary": 0.75,
+    "conditions": 1.5,
+    "interventions": 0.25,
+    "eligibility_criteria": 0.5,
+    "demographics": 0.1,
+    "status": 0.05,
+    "locations": 0.05,
+}
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 LOGGER = logging.getLogger("clinical_trial_matching.api")
 configure_logging(LOG_LEVEL)
+
+
+@dataclass(frozen=True)
+class DenseServingConfig:
+    index_path: Path
+    model_name: str
+    text_representation: str
+    batch_size: int
+    device: str
+    max_seq_length: int | None
 
 
 class SearchRequest(BaseModel):
     query: str = Field(min_length=1)
     top_k: int = Field(default=10, ge=1, le=100)
     snippet_chars: int = Field(default=240, ge=1, le=1000)
-    retriever: Literal["bm25", "fielded-bm25"] = "fielded-bm25"
+    retriever: Literal["bm25", "fielded-bm25", "dense", "hybrid"] = "fielded-bm25"
 
 
 class SearchResponse(BaseModel):
@@ -61,17 +101,24 @@ class TrialResponse(BaseModel):
     source: dict[str, str]
 
 
+@asynccontextmanager
+async def lifespan(_: FastAPI) -> Any:
+    preload_search_resources()
+    yield
+
+
 app = FastAPI(
     title="Clinical Trial Retrieval and Matching",
     version="0.1.0",
     description="Research demo API for retrieving potentially relevant clinical trials.",
+    lifespan=lifespan,
 )
 
 
 @app.middleware("http")
 async def timing_middleware(request: Request, call_next: Any) -> Response:
     start_ms = now_ms()
-    response = await call_next(request)
+    response = cast(Response, await call_next(request))
     duration_ms = elapsed_ms(start_ms)
     response.headers["X-Process-Time-Ms"] = str(duration_ms)
     log_event(
@@ -98,22 +145,86 @@ def search(request: SearchRequest) -> SearchResponse:
     load_start_ms = now_ms()
     trials = load_trial_corpus()
     corpus_load_ms = elapsed_ms(load_start_ms)
-    index_start_ms = now_ms()
-    retriever = load_search_retriever(request.retriever)
-    index_load_ms = elapsed_ms(index_start_ms)
-    retrieval_start_ms = now_ms()
-    payload = search_trials(
-        trials,
-        query=request.query,
-        top_k=request.top_k,
-        snippet_chars=request.snippet_chars,
-        retriever_name=request.retriever,
-        retriever=retriever,
-    )
-    retrieval_ms = elapsed_ms(retrieval_start_ms)
+    index_load_start_ms = now_ms()
+    lexical_retriever = None
+    dense_retriever = None
+    if request.retriever in {"bm25", "fielded-bm25", "hybrid"}:
+        lexical_name = request.retriever if request.retriever != "hybrid" else "fielded-bm25"
+        lexical_retriever = load_search_retriever(lexical_name)
+    if request.retriever in {"dense", "hybrid"}:
+        dense_retriever = load_dense_search_retriever()
+    index_load_ms = elapsed_ms(index_load_start_ms)
+
+    lexical_ms = 0.0
+    embedding_ms = 0.0
+    fusion_ms = 0.0
+    result_metadata: dict[str, dict[str, Any]] = {}
+    if request.retriever in {"bm25", "fielded-bm25"}:
+        assert lexical_retriever is not None
+        lexical_start_ms = now_ms()
+        results = lexical_retriever.search(request.query, top_k=request.top_k)
+        lexical_ms = elapsed_ms(lexical_start_ms)
+        parameters = lexical_parameters(request.retriever, request.top_k)
+    elif request.retriever == "dense":
+        assert dense_retriever is not None
+        embedding_start_ms = now_ms()
+        results = dense_retriever.search(request.query, top_k=request.top_k)
+        embedding_ms = elapsed_ms(embedding_start_ms)
+        parameters = dense_parameters(dense_retriever, request.top_k)
+    else:
+        assert lexical_retriever is not None
+        assert dense_retriever is not None
+        candidate_depth = min(
+            max(request.top_k, get_rrf_candidate_depth()),
+            len(trials),
+        )
+        lexical_start_ms = now_ms()
+        lexical_results = lexical_retriever.search(request.query, top_k=candidate_depth)
+        lexical_ms = elapsed_ms(lexical_start_ms)
+        embedding_start_ms = now_ms()
+        dense_results = dense_retriever.search(request.query, top_k=candidate_depth)
+        embedding_ms = elapsed_ms(embedding_start_ms)
+        fusion_start_ms = now_ms()
+        fused = reciprocal_rank_fuse_results(
+            [
+                RankedResults("fielded-bm25", 1.0, tuple(lexical_results)),
+                RankedResults("dense", 1.0, tuple(dense_results)),
+            ],
+            rrf_k=get_rrf_k(),
+            top_k=request.top_k,
+            candidate_depth=candidate_depth,
+        )
+        fusion_ms = elapsed_ms(fusion_start_ms)
+        results = list(fused.results)
+        result_metadata = {
+            nct_id: {"component_ranks": ranks}
+            for nct_id, ranks in fused.component_ranks.items()
+        }
+        parameters = hybrid_parameters(dense_retriever, request.top_k, candidate_depth)
+
+    payload: dict[str, Any] = {
+        "query": request.query,
+        "retriever": request.retriever,
+        "parameters": parameters,
+        "corpus": {
+            "trials": len(trials),
+            "unique_nct_ids": len({trial.nct_id for trial in trials}),
+        },
+        "results": format_search_results(
+            trials,
+            results,
+            query=request.query,
+            snippet_chars=request.snippet_chars,
+            result_metadata=result_metadata,
+        ),
+    }
+    retrieval_ms = lexical_ms + embedding_ms + fusion_ms
     payload["latency_ms"] = {
         "corpus_load": corpus_load_ms,
         "index_load": index_load_ms,
+        "lexical": lexical_ms,
+        "embedding": embedding_ms,
+        "fusion": fusion_ms,
         "retrieval": retrieval_ms,
         "total": elapsed_ms(total_start_ms),
     }
@@ -127,7 +238,10 @@ def search(request: SearchRequest) -> SearchResponse:
             "corpus_trials": payload["corpus"]["trials"],
             "result_count": len(payload["results"]),
             "latency_ms": payload["latency_ms"],
-            "index_path": get_bm25_index_path(),
+            "bm25_index_path": get_bm25_index_path(
+                "bm25" if request.retriever == "bm25" else "fielded-bm25"
+            ),
+            "dense_index_path": str(get_dense_index_path() or ""),
         },
     )
     return SearchResponse(**payload)
@@ -145,15 +259,26 @@ def get_trial(nct_id: str) -> TrialResponse:
 def metrics_health() -> dict[str, object]:
     corpus_path = get_trial_corpus_path()
     index_path = get_bm25_index_path()
+    dense_index_path = get_dense_index_path()
+    corpus_exists = corpus_path.exists()
+    dense_index_exists = dense_index_path is not None and dense_index_path.exists()
+    available_retrievers = ["fielded-bm25", "bm25"]
+    if corpus_exists and dense_index_exists:
+        available_retrievers.extend(["dense", "hybrid"])
     return {
         "status": "ok",
         "checks": {
             "api": True,
-            "trial_corpus_exists": corpus_path.exists(),
+            "trial_corpus_exists": corpus_exists,
             "bm25_index_exists": Path(index_path).exists() if index_path else False,
+            "dense_index_configured": dense_index_path is not None,
+            "dense_index_exists": dense_index_exists,
+            "dense_retriever_loaded": load_dense_search_retriever.cache_info().currsize > 0,
         },
+        "available_retrievers": available_retrievers,
         "trial_corpus_path": str(corpus_path),
         "bm25_index_path": index_path,
+        "dense_index_path": str(dense_index_path or ""),
     }
 
 
@@ -161,8 +286,38 @@ def get_trial_corpus_path() -> Path:
     return Path(os.getenv("TRIAL_CORPUS_PATH", DEFAULT_TRIAL_CORPUS_PATH))
 
 
-def get_bm25_index_path() -> str:
+def get_bm25_index_path(retriever_name: str = "fielded-bm25") -> str:
+    if retriever_name == "bm25":
+        return os.getenv("PLAIN_BM25_INDEX_PATH", "")
     return os.getenv("BM25_INDEX_PATH", "")
+
+
+def get_dense_index_path() -> Path | None:
+    value = os.getenv("DENSE_INDEX_PATH", "").strip()
+    return Path(value) if value else None
+
+
+def get_dense_serving_config() -> DenseServingConfig:
+    index_path = get_dense_index_path()
+    if index_path is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Dense retrieval is not configured. Set DENSE_INDEX_PATH.",
+        )
+    return DenseServingConfig(
+        index_path=index_path,
+        model_name=os.getenv("DENSE_MODEL_NAME", DEFAULT_DENSE_MODEL_NAME),
+        text_representation=os.getenv(
+            "DENSE_TEXT_REPRESENTATION",
+            DEFAULT_DENSE_TEXT_REPRESENTATION,
+        ),
+        batch_size=_positive_env_int("DENSE_BATCH_SIZE", DEFAULT_DENSE_BATCH_SIZE),
+        device=os.getenv("DENSE_DEVICE", DEFAULT_DENSE_DEVICE),
+        max_seq_length=_optional_positive_env_int(
+            "DENSE_MAX_SEQ_LENGTH",
+            DEFAULT_DENSE_MAX_SEQ_LENGTH,
+        ),
+    )
 
 
 @lru_cache(maxsize=1)
@@ -181,14 +336,131 @@ def load_trial_corpus() -> tuple[Trial, ...]:
 
 @lru_cache(maxsize=4)
 def load_search_retriever(retriever_name: str) -> Any:
+    if retriever_name not in {"bm25", "fielded-bm25"}:
+        raise ValueError(f"Unsupported lexical retriever: {retriever_name}")
     corpus_path = get_trial_corpus_path()
-    index_path_value = get_bm25_index_path()
+    index_path_value = get_bm25_index_path(retriever_name)
     return load_or_build_bm25_retriever(
         trials=load_trial_corpus(),
         retriever_name=retriever_name,
+        field_weights=SERVING_FIELD_WEIGHTS if retriever_name == "fielded-bm25" else None,
         corpus_path=corpus_path,
         index_path=Path(index_path_value) if index_path_value else None,
     )
+
+
+@lru_cache(maxsize=1)
+def load_dense_search_retriever() -> Any:
+    config = get_dense_serving_config()
+    if not config.index_path.exists():
+        raise HTTPException(
+            status_code=503,
+            detail=f"Dense index not found at {config.index_path}.",
+        )
+    try:
+        return load_or_build_dense_retriever(
+            trials=load_trial_corpus(),
+            model_name=config.model_name,
+            text_representation=config.text_representation,
+            batch_size=config.batch_size,
+            device=config.device,
+            max_seq_length=config.max_seq_length,
+            index_path=config.index_path,
+            show_progress_bar=False,
+        )
+    except (RuntimeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Dense retriever could not be loaded: {exc}",
+        ) from exc
+
+
+def preload_search_resources() -> None:
+    start_ms = now_ms()
+    trials = load_trial_corpus()
+    load_search_retriever("fielded-bm25")
+    dense_configured = get_dense_index_path() is not None
+    if dense_configured:
+        load_dense_search_retriever()
+    log_event(
+        LOGGER,
+        "search_resources_loaded",
+        fields={
+            "trials": len(trials),
+            "dense_configured": dense_configured,
+            "duration_ms": elapsed_ms(start_ms),
+        },
+    )
+
+
+def lexical_parameters(retriever_name: str, top_k: int) -> dict[str, Any]:
+    return {
+        "top_k": top_k,
+        "k1": 1.5,
+        "b": 0.75,
+        "field_weights": (
+            normalized_field_weights(SERVING_FIELD_WEIGHTS)
+            if retriever_name == "fielded-bm25"
+            else {}
+        ),
+        "query_stopwords": sorted(QUERY_STOPWORDS),
+    }
+
+
+def dense_parameters(retriever: Any, top_k: int) -> dict[str, Any]:
+    metadata = retriever.index.metadata
+    return {
+        "top_k": top_k,
+        "model_name": metadata["model_name"],
+        "text_representation": metadata["text_representation"],
+        "max_seq_length": metadata["max_seq_length"],
+        "embedding_dimension": metadata["embedding_dimension"],
+        "normalize_embeddings": metadata["normalize_embeddings"],
+    }
+
+
+def hybrid_parameters(
+    dense_retriever: Any,
+    top_k: int,
+    candidate_depth: int,
+) -> dict[str, Any]:
+    return {
+        "top_k": top_k,
+        "rrf_k": get_rrf_k(),
+        "candidate_depth": candidate_depth,
+        "components": {
+            "fielded-bm25": {
+                "weight": 1.0,
+                "field_weights": normalized_field_weights(SERVING_FIELD_WEIGHTS),
+            },
+            "dense": {"weight": 1.0, **dense_parameters(dense_retriever, candidate_depth)},
+        },
+    }
+
+
+def get_rrf_k() -> int:
+    return _positive_env_int("RRF_K", DEFAULT_RRF_K)
+
+
+def get_rrf_candidate_depth() -> int:
+    return _positive_env_int("RRF_CANDIDATE_DEPTH", DEFAULT_RRF_CANDIDATE_DEPTH)
+
+
+def _positive_env_int(name: str, default: int) -> int:
+    value = int(os.getenv(name, str(default)))
+    if value < 1:
+        raise ValueError(f"{name} must be at least 1")
+    return value
+
+
+def _optional_positive_env_int(name: str, default: int | None) -> int | None:
+    raw_value = os.getenv(name, "" if default is None else str(default)).strip()
+    if not raw_value:
+        return None
+    value = int(raw_value)
+    if value < 1:
+        raise ValueError(f"{name} must be at least 1")
+    return value
 
 
 def get_trial_by_nct_id(nct_id: str) -> Trial | None:

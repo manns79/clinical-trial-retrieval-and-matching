@@ -19,7 +19,7 @@ Current TREC ingestion status:
 - Small live ClinicalTrials.gov query downloads are scaffolded with raw JSON, manifest, and normalized JSONL outputs.
 - Trial corpus validation reports are scaffolded for normalized ClinicalTrials.gov JSONL files.
 - BM25 command-line search is scaffolded for normalized ClinicalTrials.gov JSONL files.
-- FastAPI `/search` is wired to the same BM25 path over a configured normalized trial JSONL corpus.
+- FastAPI `/search` serves lexical, dense bi-encoder, and reciprocal-rank-fusion hybrid modes.
 - FastAPI `/trial/{nct_id}` returns full normalized trial details from the configured corpus.
 - Streamlit UI is scaffolded as a thin client over `/search` and `/trial/{nct_id}`.
 - Docker Compose runs API, Streamlit UI, and Postgres/pgvector with one command for the local demo.
@@ -43,10 +43,11 @@ Current TREC ingestion status:
 
 Current dense retrieval status:
 
-- A configurable local sentence-transformer bi-encoder baseline is scaffolded.
+- A configurable local sentence-transformer bi-encoder baseline is scaffolded and served by API.
 - Batched corpus embeddings persist in a validated NumPy index.
 - Dense TREC evaluation and lexical/dense development comparison commands are scaffolded.
-- Biomedical model and text-representation ablations remain to be evaluated before hybrid fusion.
+- A biomedical profile ablation selected MiniLM `title_summary_conditions` on development topics.
+- Equal-weight RRF is evaluated and served with traceable component ranks and stage latency.
 
 ## Milestone 4: Reranking
 

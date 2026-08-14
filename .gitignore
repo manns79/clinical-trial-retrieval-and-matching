@@ -13,6 +13,7 @@ data/raw/
 data/interim/
 data/processed/
 data/indexes/
+data/models/
 data/manifests/
 mlruns/
 outputs/

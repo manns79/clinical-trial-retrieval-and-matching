@@ -8,14 +8,43 @@ from pathlib import Path
 from clinical_trial_matching.cli import run_rrf_experiment
 from clinical_trial_matching.evaluation.experiments import load_rrf_experiment
 from clinical_trial_matching.io import read_json, write_json
+from clinical_trial_matching.models import SearchResult
 from clinical_trial_matching.retrieval.hybrid import (
+    RankedResults,
     RankedRun,
     read_trec_rankings,
+    reciprocal_rank_fuse_results,
     reciprocal_rank_fusion,
 )
 
 
 class ReciprocalRankFusionTest(unittest.TestCase):
+    def test_online_rrf_returns_component_ranks(self) -> None:
+        fused = reciprocal_rank_fuse_results(
+            [
+                RankedResults(
+                    "lexical",
+                    1.0,
+                    (
+                        SearchResult("NCT1", 2.0, 1, "One"),
+                        SearchResult("NCT2", 1.0, 2, "Two"),
+                    ),
+                ),
+                RankedResults(
+                    "dense",
+                    1.0,
+                    (
+                        SearchResult("NCT2", 0.9, 1, "Two"),
+                        SearchResult("NCT1", 0.8, 2, "One"),
+                    ),
+                ),
+            ],
+            top_k=2,
+        )
+
+        self.assertEqual([result.nct_id for result in fused.results], ["NCT1", "NCT2"])
+        self.assertEqual(fused.component_ranks["NCT1"], {"lexical": 1, "dense": 2})
+
     def test_rrf_experiment_writes_traceable_evaluation(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)

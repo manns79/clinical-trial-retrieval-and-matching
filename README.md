@@ -305,20 +305,48 @@ curl -X POST http://localhost:8000/search \
   -d '{"query":"adult persistent asthma inhaled corticosteroid","top_k":5}'
 ```
 
-Search responses include `latency_ms` fields for corpus loading, index loading, retrieval,
-and total search handling. Every HTTP response also includes an `X-Process-Time-Ms`
-header, and the API writes structured JSON logs for HTTP requests and search events.
+The request accepts `fielded-bm25`, `bm25`, `dense`, or `hybrid` as its `retriever`. Dense and
+hybrid are advertised by `/metrics/health` only when a configured dense index exists. Search
+responses report `lexical`, `embedding`, `fusion`, and `total` latency separately, alongside
+corpus/index loading and combined retrieval timing. Every HTTP response also includes an
+`X-Process-Time-Ms` header, and the API writes structured JSON logs for search events.
 
 Set `BM25_INDEX_PATH` when running the API to reuse a persisted BM25 index:
 
 ```bash
 TRIAL_CORPUS_PATH=data/processed/clinicaltrials/asthma_recruiting_25.jsonl \
-BM25_INDEX_PATH=data/indexes/asthma_recruiting_25_fielded_bm25.pkl \
+BM25_INDEX_PATH=data/indexes/asthma_recruiting_25_serving_fielded_bm25.pkl \
 make api
 ```
 
 Search responses include `latency_ms.index_load`; after the first request this should usually
-drop near zero because the API also keeps the loaded retriever in memory.
+drop near zero because the API also keeps the loaded retriever in memory. The serving fielded
+profile uses the frozen `fielded_bm25_condition_title_v1` weights. Rebuild older default-weight
+indexes before using them with this API configuration. Using a new index path, as above, lets the
+startup loader build and persist the compatible lexical index automatically.
+
+Serve the selected dense and hybrid profiles over the local TREC corpus:
+
+```bash
+TRIAL_CORPUS_PATH=data/processed/clinicaltrials/trec_2021_qrels_trials.jsonl \
+BM25_INDEX_PATH=data/indexes/trec_2021_fielded_bm25_condition_title_v1.pkl \
+DENSE_INDEX_PATH=data/indexes/trec_2021_dense_all_minilm_l6_v2_title_summary_conditions.npz \
+make api
+```
+
+The API validates and loads the persisted dense index and sentence-transformer once during
+startup. It does not rebuild corpus embeddings while serving. The default dense model,
+representation, sequence length, and RRF settings match the selected development experiments and
+can be overridden through the variables in `.env.example`.
+
+```bash
+curl -X POST http://localhost:8000/search \
+  -H "Content-Type: application/json" \
+  -d '{"query":"adult persistent asthma","top_k":10,"retriever":"hybrid"}'
+```
+
+Hybrid results include `component_ranks` for the fielded lexical and dense rankings. Model files,
+NumPy indexes, and generated search outputs remain local ignored artifacts.
 
 Fetch a full normalized trial record:
 

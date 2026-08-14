@@ -3,7 +3,12 @@ from __future__ import annotations
 import unittest
 from typing import Any
 
-from clinical_trial_matching.ui.api_client import ApiError, get_trial_api, search_trials_api
+from clinical_trial_matching.ui.api_client import (
+    ApiError,
+    get_api_health,
+    get_trial_api,
+    search_trials_api,
+)
 
 
 class FakeResponse:
@@ -66,13 +71,38 @@ class UiApiClientTest(unittest.TestCase):
         self.assertEqual(payload["nct_id"], "NCT1")
         self.assertEqual(client.requests, [("GET", "http://localhost:8000/trial/NCT1", None)])
 
+    def test_search_trials_api_sends_selected_hybrid_mode(self) -> None:
+        client = FakeClient()
+
+        search_trials_api(
+            api_base_url="http://localhost:8000",
+            query="asthma",
+            top_k=5,
+            retriever="hybrid",
+            client=client,
+        )
+
+        self.assertEqual(client.requests[0][2]["retriever"], "hybrid")
+
+    def test_get_api_health_reads_available_retrievers(self) -> None:
+        client = FakeClient()
+
+        payload = get_api_health(api_base_url="http://localhost:8000", client=client)
+
+        self.assertEqual(payload["nct_id"], "NCT1")
+        self.assertEqual(client.requests, [("GET", "http://localhost:8000/metrics/health", None)])
+
     def test_api_error_uses_detail_message(self) -> None:
         class ErrorClient:
             def get(self, url: str) -> FakeResponse:
                 return FakeResponse(404, {"detail": "Trial not found"})
 
         with self.assertRaises(ApiError) as context:
-            get_trial_api(api_base_url="http://localhost:8000", nct_id="NCT404", client=ErrorClient())
+            get_trial_api(
+                api_base_url="http://localhost:8000",
+                nct_id="NCT404",
+                client=ErrorClient(),
+            )
 
         self.assertEqual(context.exception.status_code, 404)
         self.assertEqual(context.exception.message, "Trial not found")

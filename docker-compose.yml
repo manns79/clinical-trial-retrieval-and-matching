@@ -5,8 +5,17 @@ services:
       APP_ENV: local
       DATABASE_URL: postgresql+psycopg://trials:trials@db:5432/trials
       DATA_DIR: /app/data
-      TRIAL_CORPUS_PATH: /app/data/processed/clinicaltrials/studies.sample.jsonl
-      BM25_INDEX_PATH: /app/data/indexes/studies_sample_fielded_bm25.pkl
+      TRIAL_CORPUS_PATH: ${TRIAL_CORPUS_PATH:-/app/data/processed/clinicaltrials/studies.sample.jsonl}
+      BM25_INDEX_PATH: ${BM25_INDEX_PATH:-/app/data/indexes/studies_sample_fielded_bm25.pkl}
+      DENSE_INDEX_PATH: ${DENSE_INDEX_PATH:-}
+      DENSE_MODEL_NAME: ${DENSE_MODEL_NAME:-sentence-transformers/all-MiniLM-L6-v2}
+      DENSE_TEXT_REPRESENTATION: ${DENSE_TEXT_REPRESENTATION:-title_summary_conditions}
+      DENSE_BATCH_SIZE: ${DENSE_BATCH_SIZE:-64}
+      DENSE_DEVICE: ${DENSE_DEVICE:-cpu}
+      DENSE_MAX_SEQ_LENGTH: ${DENSE_MAX_SEQ_LENGTH:-256}
+      RRF_K: ${RRF_K:-60}
+      RRF_CANDIDATE_DEPTH: ${RRF_CANDIDATE_DEPTH:-100}
+      HF_HOME: /app/data/models/huggingface
     ports:
       - "8000:8000"
     volumes:
@@ -23,6 +32,15 @@ services:
         --trials /app/data/processed/clinicaltrials/studies.sample.jsonl
         --output /app/data/indexes/studies_sample_fielded_bm25.pkl
         --retriever fielded-bm25
+        --field-weight all_text=1.0
+        --field-weight title=1.25
+        --field-weight brief_summary=0.75
+        --field-weight conditions=1.5
+        --field-weight interventions=0.25
+        --field-weight eligibility_criteria=0.5
+        --field-weight demographics=0.1
+        --field-weight status=0.05
+        --field-weight locations=0.05
         && uvicorn clinical_trial_matching.api.main:app --host 0.0.0.0 --port 8000
     depends_on:
       db:

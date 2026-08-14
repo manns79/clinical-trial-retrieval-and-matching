@@ -26,25 +26,42 @@ This keeps the portfolio artifact deployable without forcing paid database or mo
 - `GET /trial/{nct_id}`
 - `GET /metrics/health` for lightweight operational checks
 
-`POST /search` currently uses the same in-memory BM25 path as the CLI command. It reads a normalized trial JSONL file from `TRIAL_CORPUS_PATH`, defaulting to `data/processed/clinicaltrials/studies.sample.jsonl`. The response includes retriever parameters, corpus size, ranked results, matched query terms, and snippets.
+`POST /search` supports plain BM25, the frozen field-aware BM25 profile, the selected local dense
+bi-encoder, and equal-weight reciprocal-rank fusion. It reads normalized trial JSONL from
+`TRIAL_CORPUS_PATH`. Dense and hybrid modes require a compatible ignored NumPy index configured
+through `DENSE_INDEX_PATH`; the model and index are validated and loaded once in the FastAPI
+lifespan before requests are accepted. The service never builds corpus embeddings on a request.
 
-Search responses also include `latency_ms` for corpus loading, retrieval, and total handler time.
+Search responses include stage latency for lexical retrieval, query embedding/dense scoring,
+fusion, and total handler time. Hybrid records retain each component rank alongside the fused
+score. `/metrics/health` advertises only retrievers supported by the currently mounted artifacts.
 
 `GET /trial/{nct_id}` returns the full normalized trial record from the same configured corpus. It is intended as the detail endpoint that search results can link to before the project moves to database-backed serving.
 
 ## Streamlit UI
 
-The Streamlit UI is a thin client over FastAPI. It reads `API_BASE_URL`, defaults to `http://localhost:8000`, calls `/metrics/health`, posts searches to `/search`, and fetches details from `/trial/{nct_id}`. It does not run retrieval locally.
+The Streamlit UI is a thin client over FastAPI. It reads `API_BASE_URL`, defaults to
+`http://localhost:8000`, discovers available retrievers through `/metrics/health`, posts searches
+to `/search`, displays stage latency, and fetches details from `/trial/{nct_id}`. It does not run
+models or retrieval locally.
 
 ## Docker Compose
 
-Docker Compose runs FastAPI, Streamlit, and Postgres/pgvector. The API service seeds the small synthetic ClinicalTrials.gov fixture into the mounted `data/processed/` directory before starting so a fresh local demo has a searchable corpus. The UI service uses `API_BASE_URL=http://api:8000` inside the Compose network.
+Docker Compose runs FastAPI, Streamlit, and Postgres/pgvector. The API image includes the optional
+dense dependencies, while the default Compose startup still seeds the small synthetic corpus and
+offers lexical search without downloading a model. Mounting compatible corpus/BM25/dense index
+paths enables dense and hybrid modes; Hugging Face model files are cached under ignored
+`data/models/`. The UI uses `API_BASE_URL=http://api:8000` inside the Compose network.
 
 CI runs a Docker smoke check that builds the image, starts the API container with fixture data mounted, and verifies `/health`, `/search`, and `/trial/NCT99991001`.
 
 ## Observability
 
-FastAPI includes request timing middleware that adds `X-Process-Time-Ms` to every response and logs structured JSON events for each HTTP request. The `/search` handler logs query length, requested `top_k`, corpus size, result count, and latency breakdown. Logs are written to stdout/stderr so Docker, Compose, and future hosted platforms can collect them without a paid observability service.
+FastAPI includes request timing middleware that adds `X-Process-Time-Ms` to every response and
+logs structured JSON events for each HTTP request. The `/search` handler logs query length,
+requested `top_k`, retriever, corpus size, result count, artifact paths, and stage latency. Logs
+are written to stdout/stderr so Docker, Compose, and future hosted platforms can collect them
+without a paid observability service.
 
 ## Retrieval Regression
 

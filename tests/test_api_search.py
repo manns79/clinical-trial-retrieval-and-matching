@@ -5,11 +5,12 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
 from clinical_trial_matching.ingestion.clinicaltrials import trial_to_flat_record
 from clinical_trial_matching.io import write_jsonl
-from clinical_trial_matching.models import Trial
-
+from clinical_trial_matching.models import SearchResult, Trial
 
 HAS_FASTAPI = importlib.util.find_spec("fastapi") is not None
 
@@ -17,26 +18,47 @@ HAS_FASTAPI = importlib.util.find_spec("fastapi") is not None
 @unittest.skipUnless(HAS_FASTAPI, "FastAPI is not installed")
 class ApiSearchTest(unittest.TestCase):
     def setUp(self) -> None:
-        from clinical_trial_matching.api.main import load_search_retriever, load_trial_corpus
+        from clinical_trial_matching.api.main import (
+            load_dense_search_retriever,
+            load_search_retriever,
+            load_trial_corpus,
+        )
 
         load_trial_corpus.cache_clear()
         load_search_retriever.cache_clear()
-        self.previous_corpus_path = os.environ.get("TRIAL_CORPUS_PATH")
-        self.previous_index_path = os.environ.get("BM25_INDEX_PATH")
+        load_dense_search_retriever.cache_clear()
+        self.environment_names = (
+            "TRIAL_CORPUS_PATH",
+            "BM25_INDEX_PATH",
+            "PLAIN_BM25_INDEX_PATH",
+            "DENSE_INDEX_PATH",
+            "DENSE_MODEL_NAME",
+            "DENSE_TEXT_REPRESENTATION",
+            "DENSE_BATCH_SIZE",
+            "DENSE_DEVICE",
+            "DENSE_MAX_SEQ_LENGTH",
+            "RRF_K",
+            "RRF_CANDIDATE_DEPTH",
+        )
+        self.previous_environment = {
+            name: os.environ.get(name) for name in self.environment_names
+        }
 
     def tearDown(self) -> None:
-        from clinical_trial_matching.api.main import load_search_retriever, load_trial_corpus
+        from clinical_trial_matching.api.main import (
+            load_dense_search_retriever,
+            load_search_retriever,
+            load_trial_corpus,
+        )
 
-        if self.previous_corpus_path is None:
-            os.environ.pop("TRIAL_CORPUS_PATH", None)
-        else:
-            os.environ["TRIAL_CORPUS_PATH"] = self.previous_corpus_path
-        if self.previous_index_path is None:
-            os.environ.pop("BM25_INDEX_PATH", None)
-        else:
-            os.environ["BM25_INDEX_PATH"] = self.previous_index_path
+        for name, previous_value in self.previous_environment.items():
+            if previous_value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = previous_value
         load_trial_corpus.cache_clear()
         load_search_retriever.cache_clear()
+        load_dense_search_retriever.cache_clear()
 
     def test_search_returns_traceable_bm25_records_from_configured_corpus(self) -> None:
         from clinical_trial_matching.api.main import SearchRequest, load_trial_corpus, search
@@ -86,8 +108,166 @@ class ApiSearchTest(unittest.TestCase):
         self.assertIn("latency_ms", payload)
         self.assertGreaterEqual(payload["latency_ms"]["corpus_load"], 0)
         self.assertGreaterEqual(payload["latency_ms"]["index_load"], 0)
+        self.assertGreaterEqual(payload["latency_ms"]["lexical"], 0)
+        self.assertEqual(payload["latency_ms"]["embedding"], 0)
+        self.assertEqual(payload["latency_ms"]["fusion"], 0)
         self.assertGreaterEqual(payload["latency_ms"]["retrieval"], 0)
         self.assertGreaterEqual(payload["latency_ms"]["total"], 0)
+
+    def test_serving_field_weights_match_frozen_lexical_profile(self) -> None:
+        from clinical_trial_matching.api.main import SERVING_FIELD_WEIGHTS
+        from clinical_trial_matching.evaluation.experiments import load_bm25_experiment
+
+        experiment = load_bm25_experiment(
+            Path(
+                "configs/experiments/trec_2021/"
+                "fielded_bm25_condition_title_v1.json"
+            )
+        )
+
+        self.assertEqual(SERVING_FIELD_WEIGHTS, experiment.field_weights)
+
+    def test_dense_search_uses_cached_retriever_and_reports_embedding_latency(self) -> None:
+        from clinical_trial_matching.api.main import SearchRequest, load_trial_corpus, search
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            corpus_path = self._write_search_corpus(Path(tmpdir))
+            os.environ["TRIAL_CORPUS_PATH"] = str(corpus_path)
+            load_trial_corpus.cache_clear()
+            dense_retriever = FakeServingRetriever(
+                [SearchResult("NCT1", 0.91, 1, "Asthma inhaler study")]
+            )
+            with patch(
+                "clinical_trial_matching.api.main.load_dense_search_retriever",
+                return_value=dense_retriever,
+            ):
+                response = search(
+                    SearchRequest(query="adult asthma", top_k=1, retriever="dense")
+                )
+
+        payload = response.model_dump()
+        self.assertEqual(payload["retriever"], "dense")
+        self.assertEqual(payload["results"][0]["nct_id"], "NCT1")
+        self.assertEqual(payload["parameters"]["model_name"], "fixture-model")
+        self.assertEqual(payload["latency_ms"]["lexical"], 0)
+        self.assertGreaterEqual(payload["latency_ms"]["embedding"], 0)
+        self.assertEqual(payload["latency_ms"]["fusion"], 0)
+
+    def test_hybrid_search_returns_component_ranks_and_stage_latencies(self) -> None:
+        from clinical_trial_matching.api.main import SearchRequest, load_trial_corpus, search
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            corpus_path = self._write_search_corpus(Path(tmpdir))
+            os.environ["TRIAL_CORPUS_PATH"] = str(corpus_path)
+            load_trial_corpus.cache_clear()
+            lexical_retriever = FakeServingRetriever(
+                [
+                    SearchResult("NCT1", 2.0, 1, "Asthma inhaler study"),
+                    SearchResult("NCT2", 1.0, 2, "Migraine prevention study"),
+                ]
+            )
+            dense_retriever = FakeServingRetriever(
+                [
+                    SearchResult("NCT2", 0.9, 1, "Migraine prevention study"),
+                    SearchResult("NCT1", 0.8, 2, "Asthma inhaler study"),
+                ]
+            )
+            with (
+                patch(
+                    "clinical_trial_matching.api.main.load_search_retriever",
+                    return_value=lexical_retriever,
+                ),
+                patch(
+                    "clinical_trial_matching.api.main.load_dense_search_retriever",
+                    return_value=dense_retriever,
+                ),
+            ):
+                response = search(
+                    SearchRequest(query="adult asthma", top_k=2, retriever="hybrid")
+                )
+
+        payload = response.model_dump()
+        self.assertEqual(payload["retriever"], "hybrid")
+        self.assertEqual(payload["parameters"]["rrf_k"], 60)
+        self.assertEqual(
+            payload["results"][0]["component_ranks"],
+            {"fielded-bm25": 1, "dense": 2},
+        )
+        self.assertGreaterEqual(payload["latency_ms"]["lexical"], 0)
+        self.assertGreaterEqual(payload["latency_ms"]["embedding"], 0)
+        self.assertGreaterEqual(payload["latency_ms"]["fusion"], 0)
+
+    def test_dense_loader_initializes_model_and_index_once(self) -> None:
+        from clinical_trial_matching.api.main import (
+            load_dense_search_retriever,
+            load_trial_corpus,
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            corpus_path = self._write_search_corpus(root)
+            index_path = root / "dense.npz"
+            index_path.touch()
+            os.environ["TRIAL_CORPUS_PATH"] = str(corpus_path)
+            os.environ["DENSE_INDEX_PATH"] = str(index_path)
+            load_trial_corpus.cache_clear()
+            load_dense_search_retriever.cache_clear()
+            expected = FakeServingRetriever([])
+            with patch(
+                "clinical_trial_matching.api.main.load_or_build_dense_retriever",
+                return_value=expected,
+            ) as loader:
+                first = load_dense_search_retriever()
+                second = load_dense_search_retriever()
+
+        self.assertIs(first, expected)
+        self.assertIs(second, expected)
+        loader.assert_called_once()
+
+    def test_dense_search_returns_503_without_configured_index(self) -> None:
+        from fastapi import HTTPException
+
+        from clinical_trial_matching.api.main import load_dense_search_retriever
+
+        os.environ.pop("DENSE_INDEX_PATH", None)
+        load_dense_search_retriever.cache_clear()
+
+        with self.assertRaises(HTTPException) as context:
+            load_dense_search_retriever()
+
+        self.assertEqual(context.exception.status_code, 503)
+        self.assertIn("DENSE_INDEX_PATH", context.exception.detail)
+
+    def test_lifespan_preloads_search_resources_once(self) -> None:
+        import asyncio
+
+        from clinical_trial_matching.api.main import app, lifespan
+
+        async def exercise_lifespan() -> None:
+            async with lifespan(app):
+                pass
+
+        with patch("clinical_trial_matching.api.main.preload_search_resources") as preload:
+            asyncio.run(exercise_lifespan())
+
+        preload.assert_called_once_with()
+
+    def test_health_only_advertises_dense_modes_when_index_is_configured(self) -> None:
+        from clinical_trial_matching.api.main import metrics_health
+
+        without_dense = metrics_health()
+        self.assertEqual(without_dense["available_retrievers"], ["fielded-bm25", "bm25"])
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            index_path = Path(tmpdir) / "dense.npz"
+            index_path.touch()
+            os.environ["DENSE_INDEX_PATH"] = str(index_path)
+            with_dense = metrics_health()
+
+        self.assertEqual(
+            with_dense["available_retrievers"],
+            ["fielded-bm25", "bm25", "dense", "hybrid"],
+        )
 
     def test_timing_middleware_adds_process_time_header(self) -> None:
         import asyncio
@@ -197,6 +377,47 @@ class ApiSearchTest(unittest.TestCase):
 
         self.assertEqual(context.exception.status_code, 503)
         self.assertIn("Trial corpus not found", context.exception.detail)
+
+    @staticmethod
+    def _write_search_corpus(root: Path) -> Path:
+        corpus_path = root / "trials.jsonl"
+        write_jsonl(
+            corpus_path,
+            [
+                trial_to_flat_record(
+                    Trial(
+                        nct_id="NCT1",
+                        title="Asthma inhaler study",
+                        conditions=("Asthma",),
+                    )
+                ),
+                trial_to_flat_record(
+                    Trial(
+                        nct_id="NCT2",
+                        title="Migraine prevention study",
+                        conditions=("Migraine",),
+                    )
+                ),
+            ],
+        )
+        return corpus_path
+
+
+class FakeServingRetriever:
+    def __init__(self, results: list[SearchResult]) -> None:
+        self.results = results
+        self.index = SimpleNamespace(
+            metadata={
+                "model_name": "fixture-model",
+                "text_representation": "title_summary_conditions",
+                "max_seq_length": 128,
+                "embedding_dimension": 3,
+                "normalize_embeddings": True,
+            }
+        )
+
+    def search(self, query: str, *, top_k: int = 10) -> list[SearchResult]:
+        return self.results[:top_k]
 
 
 if __name__ == "__main__":

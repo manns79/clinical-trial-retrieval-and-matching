@@ -284,11 +284,35 @@ def search_trials(
             "trials": len(trial_list),
             "unique_nct_ids": len(trial_by_id),
         },
-        "results": [
-            _result_record(result, trial_by_id[result.nct_id], query, snippet_chars)
-            for result in results
-        ],
+        "results": format_search_results(
+            trial_list,
+            results,
+            query=query,
+            snippet_chars=snippet_chars,
+        ),
     }
+
+
+def format_search_results(
+    trials: Iterable[Trial],
+    results: Iterable[SearchResult],
+    *,
+    query: str,
+    snippet_chars: int,
+    result_metadata: dict[str, dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    trial_by_id = {trial.nct_id: trial for trial in trials}
+    metadata = result_metadata or {}
+    return [
+        _result_record(
+            result,
+            trial_by_id[result.nct_id],
+            query,
+            snippet_chars,
+            metadata.get(result.nct_id),
+        )
+        for result in results
+    ]
 
 
 def _result_record(
@@ -296,8 +320,9 @@ def _result_record(
     trial: Trial,
     query: str,
     snippet_chars: int,
+    metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    return {
+    record = {
         "rank": result.rank,
         "score": round(result.score, 6),
         "nct_id": trial.nct_id,
@@ -313,6 +338,9 @@ def _result_record(
         "matched_terms": matched_terms(query, trial.searchable_text),
         "snippet": make_snippet(trial.searchable_text, query, snippet_chars),
     }
+    if metadata:
+        record.update(metadata)
+    return record
 
 
 def matched_terms(query: str, text: str) -> list[str]:
@@ -382,7 +410,9 @@ def trial_field_texts(trial: Trial) -> dict[str, str]:
         "demographics": " ".join(
             part for part in [trial.sex, trial.minimum_age, trial.maximum_age] if part
         ),
-        "status": " ".join(part for part in [trial.status, *trial.phases, trial.study_type] if part),
+        "status": " ".join(
+            part for part in [trial.status, *trial.phases, trial.study_type] if part
+        ),
         "locations": " ".join(trial.locations),
     }
 
@@ -433,7 +463,10 @@ def field_index_from_record(record: dict[str, Any]) -> BM25FieldIndex:
         field_name=str(record["field_name"]),
         weight=float(record["weight"]),
         document_frequencies=Counter(
-            {str(term): int(frequency) for term, frequency in record["document_frequencies"].items()}
+            {
+                str(term): int(frequency)
+                for term, frequency in record["document_frequencies"].items()
+            }
         ),
         doc_lengths=[int(length) for length in record["doc_lengths"]],
         avg_doc_length=float(record["avg_doc_length"]),

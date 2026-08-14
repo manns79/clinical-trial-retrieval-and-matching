@@ -8,7 +8,7 @@ WORKDIR /app
 COPY pyproject.toml README.md ./
 COPY src ./src
 
-RUN pip install --no-cache-dir -e ".[ui]"
+RUN pip install --no-cache-dir -e ".[ui,dense]"
 
 EXPOSE 8000 8501
 
