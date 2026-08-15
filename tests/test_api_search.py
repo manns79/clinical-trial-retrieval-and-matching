@@ -259,8 +259,11 @@ class ApiSearchTest(unittest.TestCase):
         self.assertEqual(without_dense["available_retrievers"], ["fielded-bm25", "bm25"])
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            index_path = Path(tmpdir) / "dense.npz"
+            root = Path(tmpdir)
+            corpus_path = self._write_search_corpus(root)
+            index_path = root / "dense.npz"
             index_path.touch()
+            os.environ["TRIAL_CORPUS_PATH"] = str(corpus_path)
             os.environ["DENSE_INDEX_PATH"] = str(index_path)
             with_dense = metrics_health()
 
