@@ -383,6 +383,34 @@ make ui
 
 The UI opens at `http://localhost:8501` and calls the FastAPI service at `API_BASE_URL`, defaulting to `http://localhost:8000`.
 
+## Serving Benchmark
+
+Measure the selected lexical, dense, and hybrid profiles over the local 26,150-trial corpus:
+
+```bash
+make benchmark-trec-2021-serving
+```
+
+The tracked spec at `configs/benchmarks/trec_2021_local_serving.json` pins five synthetic queries,
+one warmup round, five measurement rounds, `top_k=10`, the selected indexes and MiniLM profile,
+and equal-weight RRF settings. The command writes the ignored report to
+`outputs/trec_2021_local_serving_benchmark.json`.
+
+The report includes:
+
+- API import and corpus/index/model preload time for the fresh benchmark process
+- Warm handler latency with minimum, mean, p50, p95, and maximum values
+- Lexical, embedding, fusion, and total stage latency for each retriever
+- Per-mode and aggregate sequential requests per second
+- RSS before startup, after startup, after measurement, and process peak
+- Corpus, lexical index, dense index, and local model-cache sizes
+- Python, platform, CPU-count, and key package-version metadata
+
+Warm measurements call the FastAPI search handler in-process after deterministic warmup. They
+exclude HTTP transport and response serialization. Throughput is sequential single-process
+capacity, not a concurrent load-test claim. The model must already be cached because the benchmark
+forces offline mode; no hosted service or paid API is used.
+
 ## Docker Compose Demo
 
 Run the local API + Streamlit UI demo with one command:

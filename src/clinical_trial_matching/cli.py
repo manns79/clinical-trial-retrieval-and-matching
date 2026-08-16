@@ -3,6 +3,10 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+from clinical_trial_matching.benchmarking.serving import (
+    load_serving_benchmark,
+    run_serving_benchmark,
+)
 from clinical_trial_matching.evaluation.comparison import (
     build_metrics_comparison,
     infer_comparison_format,
@@ -295,6 +299,12 @@ def main() -> None:
         help="Optional metric view to include, such as eligible_only. May be provided multiple times.",
     )
 
+    serving_benchmark = subparsers.add_parser(
+        "benchmark-serving",
+        help="Measure local serving startup, latency, throughput, memory, and artifact sizes.",
+    )
+    serving_benchmark.add_argument("--config", type=Path, required=True)
+
     trec_topics = subparsers.add_parser(
         "ingest-trec-topics", help="Normalize TREC Clinical Trials topics XML to JSONL."
     )
@@ -472,6 +482,8 @@ def main() -> None:
             output_format=args.format,
             views=args.view,
         )
+    elif args.command == "benchmark-serving":
+        benchmark_serving(args.config)
     elif args.command == "ingest-trec-topics":
         ingest_trec_topics(args.year, args.input, args.output)
     elif args.command == "ingest-trec-qrels":
@@ -1135,6 +1147,24 @@ def compare_metrics(
     resolved_format = infer_comparison_format(output_path, output_format)
     write_metrics_comparison(output_path, comparison, resolved_format)
     print(f"Wrote {len(comparison['rows'])} comparison rows to {output_path}")
+
+
+def benchmark_serving(config_path: Path) -> None:
+    benchmark = load_serving_benchmark(config_path)
+    print(f"Running serving benchmark {benchmark.name} from {benchmark.config_label}")
+    report = run_serving_benchmark(benchmark)
+    print(f"Wrote serving benchmark report to {benchmark.output_path}")
+    print(
+        f"Cold start: {report['cold_start']['seconds']} s | "
+        f"Peak RSS: {report['memory']['peak']['mib']} MiB"
+    )
+    for mode in benchmark.modes:
+        mode_report = report["warm"]["modes"][mode]
+        latency = mode_report["handler_latency_ms"]
+        print(
+            f"{mode}: p50={latency['p50']} ms p95={latency['p95']} ms "
+            f"throughput={mode_report['sequential_requests_per_second']} req/s"
+        )
 
 
 def read_qrels(path: Path) -> dict[str, dict[str, int]]:

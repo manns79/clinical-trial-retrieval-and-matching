@@ -1,7 +1,7 @@
 PYTHON ?= python3
 PYTHONPATH ?= src
 
-.PHONY: install install-dev install-ui install-dense test compile ingest-sample ingest-ctgov-sample report-ctgov-sample search-ctgov-sample download-ctgov-small build-trec-corpus-smoke build-bm25-index-sample evaluate-baseline evaluate-trec-bm25-sample compare-metrics-sample split-trec-2021-topics run-trec-2021-bm25 run-trec-2021-fielded-bm25 run-trec-2021-fielded-bm25-candidate compare-trec-2021-bm25 evaluate-trec-2021-lexical-holdout run-trec-2021-dense run-trec-2021-dense-biomedical compare-trec-2021-dense-ablation compare-trec-2021-lexical-dense run-trec-2021-hybrid compare-trec-2021-retrievers check-retrieval-regression ingest-trec-sample validate-trec-sample write-manifest-sample api ui docker-up docker-down docker-smoke clean
+.PHONY: install install-dev install-ui install-dense test compile ingest-sample ingest-ctgov-sample report-ctgov-sample search-ctgov-sample download-ctgov-small build-trec-corpus-smoke build-bm25-index-sample evaluate-baseline evaluate-trec-bm25-sample compare-metrics-sample split-trec-2021-topics run-trec-2021-bm25 run-trec-2021-fielded-bm25 run-trec-2021-fielded-bm25-candidate compare-trec-2021-bm25 evaluate-trec-2021-lexical-holdout run-trec-2021-dense run-trec-2021-dense-biomedical compare-trec-2021-dense-ablation compare-trec-2021-lexical-dense run-trec-2021-hybrid compare-trec-2021-retrievers benchmark-trec-2021-serving check-retrieval-regression ingest-trec-sample validate-trec-sample write-manifest-sample api ui docker-up docker-down docker-smoke clean
 
 install:
 	$(PYTHON) -m pip install -e .
@@ -168,6 +168,10 @@ compare-trec-2021-retrievers:
 		--output outputs/trec_2021_development_retriever_comparison.md \
 		--view eligible_only \
 		--view excluded_or_eligible
+
+benchmark-trec-2021-serving:
+	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m clinical_trial_matching.cli benchmark-serving \
+		--config configs/benchmarks/trec_2021_local_serving.json
 
 check-retrieval-regression:
 	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m clinical_trial_matching.cli check-retrieval-regression \

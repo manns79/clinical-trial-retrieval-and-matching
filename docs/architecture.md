@@ -67,6 +67,19 @@ without a paid observability service.
 
 CI runs a tiny deterministic BM25 regression check over synthetic trial/topic/qrels fixtures. It records the full run and metrics, then fails if configured thresholds such as Recall@100, MRR, or nDCG@10 drop. This is intentionally small and fast; larger TREC evaluations remain a separate benchmark workflow.
 
+## Serving Performance
+
+The tracked local serving benchmark uses the same environment contract and cached resources as
+FastAPI. It measures API import plus resource preload as cold start, performs deterministic
+warmups, and interleaves fielded BM25, dense, and hybrid requests over synthetic queries. Reports
+capture handler and stage p50/p95 latency, sequential throughput, RSS, artifact sizes, and system
+metadata under ignored `outputs/` paths.
+
+This benchmark intentionally excludes HTTP transport and concurrency. It answers whether the
+single-process retrieval stack has plausible memory and latency headroom before adding a
+cross-encoder. A later deployment/load test should measure network serialization, concurrent
+requests, queueing, and worker-level memory duplication separately.
+
 ## TREC-Style Evaluation
 
 The BM25 benchmark command reads normalized trial JSONL, normalized TREC topic JSONL, and qrels, then writes both a six-column TREC run file and a metrics JSON report. Generated run files and reports belong under ignored `outputs/` paths.

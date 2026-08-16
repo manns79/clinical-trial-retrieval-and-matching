@@ -48,6 +48,8 @@ Current dense retrieval status:
 - Dense TREC evaluation and lexical/dense development comparison commands are scaffolded.
 - A biomedical profile ablation selected MiniLM `title_summary_conditions` on development topics.
 - Equal-weight RRF is evaluated and served with traceable component ranks and stage latency.
+- A repeatable local serving benchmark reports cold start, warm p50/p95 latency, sequential
+  throughput, RSS, and artifact/model-cache sizes for lexical, dense, and hybrid modes.
 
 ## Milestone 4: Reranking
 

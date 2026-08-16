@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "name": "trec_2021_local_serving",
+  "description": "Local CPU serving benchmark for the selected lexical, dense, and hybrid retrieval profiles.",
+  "project_root": "../..",
+  "serving": {
+    "corpus": "data/processed/clinicaltrials/trec_2021_qrels_trials.jsonl",
+    "bm25_index": "data/indexes/trec_2021_fielded_bm25_condition_title_v1.pkl",
+    "dense_index": "data/indexes/trec_2021_dense_all_minilm_l6_v2_title_summary_conditions.npz",
+    "dense_model_name": "sentence-transformers/all-MiniLM-L6-v2",
+    "dense_text_representation": "title_summary_conditions",
+    "dense_batch_size": 64,
+    "dense_device": "cpu",
+    "dense_max_seq_length": 256,
+    "rrf_k": 60,
+    "rrf_candidate_depth": 100
+  },
+  "benchmark": {
+    "modes": [
+      "fielded-bm25",
+      "dense",
+      "hybrid"
+    ],
+    "queries": [
+      "Adult with persistent asthma and wheezing seeking an inhaled corticosteroid study.",
+      "Child with type 1 diabetes using insulin and interested in glucose monitoring research.",
+      "Older adult with metastatic HER2-positive breast cancer after prior systemic therapy.",
+      "Young adult with moderate Crohn disease considering biologic treatment research.",
+      "Adult with EGFR-mutated non-small cell lung cancer seeking a targeted therapy trial."
+    ],
+    "warmup_rounds": 1,
+    "measurement_rounds": 5,
+    "top_k": 10,
+    "snippet_chars": 240
+  },
+  "artifacts": {
+    "output": "outputs/trec_2021_local_serving_benchmark.json"
+  }
+}
