@@ -1158,6 +1158,17 @@ def benchmark_serving(config_path: Path) -> None:
         f"Cold start: {report['cold_start']['seconds']} s | "
         f"Peak RSS: {report['memory']['peak']['mib']} MiB"
     )
+    for phase in report["cold_start"]["phases"]:
+        print(
+            f"startup/{phase['name']}: {phase['milliseconds']} ms | "
+            f"retained RSS delta={phase['retained_rss_delta']['mib']} MiB | "
+            f"peak RSS delta={phase['peak_rss_delta']['mib']} MiB"
+        )
+    dominant = report["cold_start"]["dominant_resource_phase"]
+    print(
+        f"Dominant startup resource: {dominant['name']} "
+        f"({dominant['retained_rss_delta']['mib']} MiB retained RSS delta)"
+    )
     for mode in benchmark.modes:
         mode_report = report["warm"]["modes"][mode]
         latency = mode_report["handler_latency_ms"]

@@ -50,6 +50,8 @@ Current dense retrieval status:
 - Equal-weight RRF is evaluated and served with traceable component ranks and stage latency.
 - A repeatable local serving benchmark reports cold start, warm p50/p95 latency, sequential
   throughput, RSS, and artifact/model-cache sizes for lexical, dense, and hybrid modes.
+- Staged startup profiling identifies the expanded Python fielded BM25 index as the dominant
+  serving-memory contributor, making a compact lexical backend the next deployment task.
 
 ## Milestone 4: Reranking
 

@@ -20,6 +20,7 @@ from clinical_trial_matching.io import write_json
 SERVING_BENCHMARK_SCHEMA_VERSION = 1
 PRIMARY_MODES = ("fielded-bm25", "dense", "hybrid")
 STAGE_NAMES = ("lexical", "embedding", "fusion", "total")
+STARTUP_RESOURCE_PHASES = ("corpus", "fielded_bm25", "dense_index_and_model")
 
 
 @dataclass(frozen=True)
@@ -78,7 +79,10 @@ class ServingBenchmark:
 
 
 class ServingRuntime(Protocol):
-    def preload(self) -> None: ...
+    def preload(
+        self,
+        on_phase_complete: Callable[[str], None] | None = None,
+    ) -> None: ...
 
     def search(
         self,
@@ -102,8 +106,11 @@ class ApiServingRuntime:
         self._preload = preload_search_resources
         self._search = search
 
-    def preload(self) -> None:
-        self._preload()
+    def preload(
+        self,
+        on_phase_complete: Callable[[str], None] | None = None,
+    ) -> None:
+        self._preload(on_phase_complete=on_phase_complete)
 
     def search(
         self,
@@ -277,10 +284,40 @@ def run_serving_benchmark(
     memory_before = process_memory()
     with temporary_environment(benchmark.environment()):
         cold_start = clock()
+        phase_start = cold_start
+        phase_memory_before = memory_before
+        startup_phases: list[dict[str, Any]] = []
         runtime = runtime_factory()
-        runtime.preload()
+        phase_memory_after = process_memory()
+        startup_phases.append(
+            startup_phase_report(
+                name="api_import",
+                elapsed_ms=_elapsed_ms(phase_start, clock),
+                before=phase_memory_before,
+                after=phase_memory_after,
+            )
+        )
+        phase_start = clock()
+        phase_memory_before = phase_memory_after
+
+        def record_startup_phase(name: str) -> None:
+            nonlocal phase_start, phase_memory_before
+            phase_memory_after = process_memory()
+            startup_phases.append(
+                startup_phase_report(
+                    name=name,
+                    elapsed_ms=_elapsed_ms(phase_start, clock),
+                    before=phase_memory_before,
+                    after=phase_memory_after,
+                )
+            )
+            phase_start = clock()
+            phase_memory_before = phase_memory_after
+
+        runtime.preload(on_phase_complete=record_startup_phase)
         cold_start_ms = _elapsed_ms(cold_start, clock)
         memory_after_startup = process_memory()
+        validate_startup_phases(startup_phases)
 
         for _ in range(benchmark.warmup_rounds):
             for query in benchmark.queries:
@@ -360,6 +397,8 @@ def run_serving_benchmark(
         "cold_start": {
             "milliseconds": round(cold_start_ms, 3),
             "seconds": round(cold_start_ms / 1000, 3),
+            "phases": startup_phases,
+            "dominant_resource_phase": dominant_startup_resource_phase(startup_phases),
         },
         "warm": {
             "measurement_wall_ms": round(measurement_wall_ms, 3),
@@ -384,6 +423,68 @@ def run_serving_benchmark(
     }
     write_json(benchmark.output_path, report)
     return report
+
+
+def startup_phase_report(
+    *,
+    name: str,
+    elapsed_ms: float,
+    before: Mapping[str, int],
+    after: Mapping[str, int],
+) -> dict[str, Any]:
+    before_rss = int(before["rss_bytes"])
+    after_rss = int(after["rss_bytes"])
+    before_peak = int(before["peak_rss_bytes"])
+    after_peak = max(int(after["peak_rss_bytes"]), after_rss)
+    return {
+        "name": name,
+        "milliseconds": round(elapsed_ms, 3),
+        "rss_before": _byte_measure(before_rss),
+        "rss_after": _byte_measure(after_rss),
+        "retained_rss_delta": _byte_measure(after_rss - before_rss),
+        "peak_rss_after": _byte_measure(after_peak),
+        "peak_rss_delta": _byte_measure(max(0, after_peak - before_peak)),
+    }
+
+
+def validate_startup_phases(phases: Sequence[Mapping[str, Any]]) -> None:
+    names = tuple(str(phase["name"]) for phase in phases)
+    expected = ("api_import", *STARTUP_RESOURCE_PHASES)
+    if names != expected:
+        raise RuntimeError(
+            "Serving startup phases did not match the expected order: "
+            + ", ".join(expected)
+        )
+
+
+def dominant_startup_resource_phase(
+    phases: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    resources = [
+        phase for phase in phases if str(phase["name"]) in STARTUP_RESOURCE_PHASES
+    ]
+    if not resources:
+        raise ValueError("No serving startup resource phases were recorded")
+    dominant = max(
+        resources,
+        key=lambda phase: int(cast(Mapping[str, Any], phase["retained_rss_delta"])["bytes"]),
+    )
+    positive_total = sum(
+        max(
+            0,
+            int(cast(Mapping[str, Any], phase["retained_rss_delta"])["bytes"]),
+        )
+        for phase in resources
+    )
+    dominant_bytes = int(
+        cast(Mapping[str, Any], dominant["retained_rss_delta"])["bytes"]
+    )
+    share = 0.0 if positive_total == 0 else max(0, dominant_bytes) / positive_total
+    return {
+        "name": str(dominant["name"]),
+        "retained_rss_delta": dominant["retained_rss_delta"],
+        "share_of_positive_resource_delta": round(share, 4),
+    }
 
 
 def summarize_mode_measurements(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:

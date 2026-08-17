@@ -75,6 +75,11 @@ warmups, and interleaves fielded BM25, dense, and hybrid requests over synthetic
 capture handler and stage p50/p95 latency, sequential throughput, RSS, artifact sizes, and system
 metadata under ignored `outputs/` paths.
 
+Startup profiling checkpoints the process after API import, normalized corpus loading, fielded
+BM25 loading, and combined dense index/model loading. Each checkpoint reports elapsed time,
+retained RSS change, and observed peak RSS change. These deltas describe one process on one host;
+they can be influenced by allocator behavior and operating-system filesystem caches.
+
 This benchmark intentionally excludes HTTP transport and concurrency. It answers whether the
 single-process retrieval stack has plausible memory and latency headroom before adding a
 cross-encoder. A later deployment/load test should measure network serialization, concurrent

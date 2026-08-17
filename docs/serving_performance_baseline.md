@@ -43,8 +43,24 @@ Aggregate interleaved throughput was 7.702 requests per second.
 
 Corpus and persisted indexes total 234.636 MiB on disk. The much larger in-memory footprint shows
 that deserialized serving structures are the deployment constraint rather than artifact storage.
-The expanded Python lexical index and duplicated trial text are the leading suspects, but staged
-resource profiling should confirm their individual contributions.
+
+### Staged startup profile
+
+A fresh-process rerun on 2026-08-17 added checkpoints around the production preload path. The
+same tracked configuration and local artifacts were used; filesystem caches may have differed
+from the original run.
+
+| startup phase | elapsed seconds | retained RSS delta MiB | peak RSS delta MiB |
+| --- | ---: | ---: | ---: |
+| API import | 0.627 | 20.141 | 20.168 |
+| normalized corpus | 1.616 | 199.145 | 199.352 |
+| fielded BM25 | 12.838 | 2,835.586 | 2,842.660 |
+| dense index and model | 15.777 | 598.199 | 628.223 |
+
+This run reached 3,675.750 MiB RSS after startup and 3,733.715 MiB after warm measurements.
+Fielded BM25 accounted for 78.05% of the positive retained RSS increase across resource phases.
+The 110.296 MiB pickle expands into Python counters, dictionaries, strings, tuples, and integer
+objects, confirming the lexical representation as the primary deployment-memory constraint.
 
 ## Decision
 
@@ -52,10 +68,12 @@ Warm latency has plausible room for a small reranker, particularly after dense r
 current shared process already requires about 3.7 GiB RSS. Adding a cross-encoder now would increase
 both memory and cold-start pressure and would make a free-tier public deployment unlikely.
 
-Deployment optimization should come first. The next investigation should isolate corpus,
-lexical-index, and dense-resource memory deltas, then replace or redesign the expanded in-memory
-fielded BM25 representation. Dense retrieval itself is fast and its persisted index is compact;
-the lexical serving path is the stronger optimization target.
+Deployment optimization should come first. The staged profile confirms that the next experiment
+should replace the expanded in-memory fielded BM25 representation with a compact disk-backed
+lexical backend and compare development retrieval quality, latency, startup, and memory against
+the frozen lexical baseline. SQLite FTS5 is the first candidate because it is local, free, and
+available through Python's standard library. Dense retrieval itself remains fast and its
+persisted index is compact enough that it is not the first optimization target.
 
 The detailed benchmark JSON remains an ignored local artifact and contains no patient records or
 search results.

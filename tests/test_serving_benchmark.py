@@ -7,10 +7,12 @@ from typing import Any
 
 from clinical_trial_matching.benchmarking.serving import (
     PRIMARY_MODES,
+    dominant_startup_resource_phase,
     latency_summary,
     load_serving_benchmark,
     percentile,
     run_serving_benchmark,
+    startup_phase_report,
     summarize_mode_measurements,
 )
 from clinical_trial_matching.io import read_json, write_json
@@ -21,8 +23,11 @@ class FakeServingRuntime:
         self.preload_calls = 0
         self.search_calls: list[tuple[str, str]] = []
 
-    def preload(self) -> None:
+    def preload(self, on_phase_complete: Any = None) -> None:
         self.preload_calls += 1
+        for phase in ("corpus", "fielded_bm25", "dense_index_and_model"):
+            if on_phase_complete is not None:
+                on_phase_complete(phase)
 
     def search(
         self,
@@ -106,6 +111,10 @@ class ServingBenchmarkTest(unittest.TestCase):
             0.5,
         )
         self.assertEqual(report["cost"]["hosted_service_cost_usd"], 0.0)
+        self.assertEqual(
+            [phase["name"] for phase in report["cold_start"]["phases"]],
+            ["api_import", "corpus", "fielded_bm25", "dense_index_and_model"],
+        )
         self.assertEqual(persisted["benchmark"]["name"], "fixture_serving")
         self.assertEqual(persisted["artifacts"]["files"]["dense_index"]["bytes"], 5)
 
@@ -154,6 +163,34 @@ class ServingBenchmarkTest(unittest.TestCase):
         self.assertEqual(summary["handler_latency_ms"]["p50"], 15.0)
         self.assertEqual(summary["sequential_requests_per_second"], 66.667)
         self.assertEqual(summary["sampled_process_rss"]["maximum"]["mib"], 110.0)
+
+    def test_startup_phase_reports_retained_and_peak_rss_deltas(self) -> None:
+        phase = startup_phase_report(
+            name="fielded_bm25",
+            elapsed_ms=123.4567,
+            before={"rss_bytes": 100, "peak_rss_bytes": 120},
+            after={"rss_bytes": 160, "peak_rss_bytes": 210},
+        )
+
+        self.assertEqual(phase["milliseconds"], 123.457)
+        self.assertEqual(phase["retained_rss_delta"]["bytes"], 60)
+        self.assertEqual(phase["peak_rss_delta"]["bytes"], 90)
+
+    def test_dominant_resource_phase_excludes_api_import(self) -> None:
+        phases = [
+            {"name": "api_import", "retained_rss_delta": {"bytes": 500}},
+            {"name": "corpus", "retained_rss_delta": {"bytes": 100}},
+            {"name": "fielded_bm25", "retained_rss_delta": {"bytes": 300}},
+            {
+                "name": "dense_index_and_model",
+                "retained_rss_delta": {"bytes": 100},
+            },
+        ]
+
+        dominant = dominant_startup_resource_phase(phases)
+
+        self.assertEqual(dominant["name"], "fielded_bm25")
+        self.assertEqual(dominant["share_of_positive_resource_delta"], 0.6)
 
 
 def serving_benchmark_payload() -> dict[str, Any]:

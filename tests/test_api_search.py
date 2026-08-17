@@ -252,6 +252,29 @@ class ApiSearchTest(unittest.TestCase):
 
         preload.assert_called_once_with()
 
+    def test_preload_reports_completed_resource_phases_in_order(self) -> None:
+        from clinical_trial_matching.api.main import preload_search_resources
+
+        completed: list[str] = []
+        with (
+            patch(
+                "clinical_trial_matching.api.main.load_trial_corpus",
+                return_value=(Trial(nct_id="NCT1", title="Fixture"),),
+            ),
+            patch("clinical_trial_matching.api.main.load_search_retriever"),
+            patch(
+                "clinical_trial_matching.api.main.get_dense_index_path",
+                return_value=Path("dense.npz"),
+            ),
+            patch("clinical_trial_matching.api.main.load_dense_search_retriever"),
+        ):
+            preload_search_resources(on_phase_complete=completed.append)
+
+        self.assertEqual(
+            completed,
+            ["corpus", "fielded_bm25", "dense_index_and_model"],
+        )
+
     def test_health_only_advertises_dense_modes_when_index_is_configured(self) -> None:
         from clinical_trial_matching.api.main import metrics_health
 

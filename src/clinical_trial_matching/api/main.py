@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+from collections.abc import Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from functools import lru_cache
@@ -375,13 +376,21 @@ def load_dense_search_retriever() -> Any:
         ) from exc
 
 
-def preload_search_resources() -> None:
+def preload_search_resources(
+    on_phase_complete: Callable[[str], None] | None = None,
+) -> None:
     start_ms = now_ms()
     trials = load_trial_corpus()
+    if on_phase_complete is not None:
+        on_phase_complete("corpus")
     load_search_retriever("fielded-bm25")
+    if on_phase_complete is not None:
+        on_phase_complete("fielded_bm25")
     dense_configured = get_dense_index_path() is not None
     if dense_configured:
         load_dense_search_retriever()
+        if on_phase_complete is not None:
+            on_phase_complete("dense_index_and_model")
     log_event(
         LOGGER,
         "search_resources_loaded",

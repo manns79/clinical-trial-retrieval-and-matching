@@ -399,6 +399,8 @@ and equal-weight RRF settings. The command writes the ignored report to
 The report includes:
 
 - API import and corpus/index/model preload time for the fresh benchmark process
+- Per-phase retained and peak RSS deltas for corpus, fielded BM25, and dense resources
+- The startup resource phase responsible for the largest positive retained RSS increase
 - Warm handler latency with minimum, mean, p50, p95, and maximum values
 - Lexical, embedding, fusion, and total stage latency for each retriever
 - Per-mode and aggregate sequential requests per second
