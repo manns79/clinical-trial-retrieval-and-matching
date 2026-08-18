@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "name": "trec_2021_development_sqlite_fts5_condition_title_v1",
+  "description": "SQLite FTS5 prototype using the selected condition/title-heavy lexical weights on development topics.",
+  "project_root": "../../..",
+  "field_weights": {
+    "title": 1.25,
+    "brief_summary": 0.75,
+    "conditions": 1.5,
+    "interventions": 0.25,
+    "eligibility_criteria": 0.5
+  },
+  "benchmark": {
+    "trials": "data/processed/clinicaltrials/trec_2021_qrels_trials.jsonl",
+    "topics": "data/processed/trec/2021/splits/development/topics.jsonl",
+    "qrels": "data/processed/trec/2021/splits/development/qrels.jsonl",
+    "top_k": 100
+  },
+  "artifacts": {
+    "index": "data/indexes/trec_2021_sqlite_fts5_condition_title_v1.sqlite",
+    "run": "outputs/trec_2021_development_sqlite_fts5_condition_title_v1.run",
+    "metrics": "outputs/trec_2021_development_sqlite_fts5_condition_title_v1_metrics.json",
+    "diagnostics": "outputs/trec_2021_development_sqlite_fts5_condition_title_v1_diagnostics.json"
+  }
+}

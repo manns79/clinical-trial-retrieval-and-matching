@@ -19,7 +19,7 @@ def search_trials_api(
     query: str,
     top_k: int,
     snippet_chars: int = 240,
-    retriever: str = "fielded-bm25",
+    retriever: str = "sqlite-fts5",
     client: Any = None,
 ) -> dict[str, Any]:
     payload = {

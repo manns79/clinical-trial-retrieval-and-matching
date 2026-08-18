@@ -12,10 +12,14 @@ from clinical_trial_matching.retrieval.bm25 import (
     normalized_field_weights,
 )
 from clinical_trial_matching.retrieval.dense import TEXT_REPRESENTATIONS
+from clinical_trial_matching.retrieval.sqlite_fts import (
+    normalize_sqlite_fts_field_weights,
+)
 
 BM25_EXPERIMENT_SCHEMA_VERSION = 1
 DENSE_EXPERIMENT_SCHEMA_VERSION = 1
 RRF_EXPERIMENT_SCHEMA_VERSION = 1
+SQLITE_FTS_EXPERIMENT_SCHEMA_VERSION = 1
 EXPERIMENT_NAME_RE = re.compile(r"[a-z0-9][a-z0-9_.-]*")
 
 
@@ -73,6 +77,33 @@ class DenseExperiment:
             "name": self.name,
             "description": self.description,
             "schema_version": DENSE_EXPERIMENT_SCHEMA_VERSION,
+            "config_path": self.config_label,
+            "config_sha256": self.config_sha256,
+        }
+
+
+@dataclass(frozen=True)
+class SQLiteFtsExperiment:
+    name: str
+    description: str
+    field_weights: dict[str, float]
+    top_k: int
+    trials_path: Path
+    topics_path: Path
+    qrels_path: Path
+    index_path: Path
+    run_output_path: Path
+    metrics_output_path: Path
+    diagnostics_output_path: Path
+    config_path: Path
+    config_label: str
+    config_sha256: str
+
+    def metadata(self) -> dict[str, str | int]:
+        return {
+            "name": self.name,
+            "description": self.description,
+            "schema_version": SQLITE_FTS_EXPERIMENT_SCHEMA_VERSION,
             "config_path": self.config_label,
             "config_sha256": self.config_sha256,
         }
@@ -280,6 +311,70 @@ def load_dense_experiment(path: Path) -> DenseExperiment:
         device=device,
         max_seq_length=max_seq_length,
         top_k=top_k,
+        trials_path=_project_path(project_root, benchmark, "trials", "benchmark"),
+        topics_path=_project_path(project_root, benchmark, "topics", "benchmark"),
+        qrels_path=_project_path(project_root, benchmark, "qrels", "benchmark"),
+        index_path=index_path,
+        run_output_path=_project_path(project_root, artifacts, "run", "artifacts"),
+        metrics_output_path=_project_path(project_root, artifacts, "metrics", "artifacts"),
+        diagnostics_output_path=_project_path(
+            project_root, artifacts, "diagnostics", "artifacts"
+        ),
+        config_path=config_path,
+        config_label=config_label,
+        config_sha256=hashlib.sha256(raw).hexdigest(),
+    )
+
+
+def load_sqlite_fts_experiment(path: Path) -> SQLiteFtsExperiment:
+    raw, payload = _read_experiment_json(path, "SQLite FTS5")
+    _reject_unknown_fields(
+        payload,
+        "SQLite FTS5 experiment config",
+        {
+            "schema_version",
+            "name",
+            "description",
+            "project_root",
+            "field_weights",
+            "benchmark",
+            "artifacts",
+        },
+    )
+    if payload.get("schema_version") != SQLITE_FTS_EXPERIMENT_SCHEMA_VERSION:
+        raise ValueError(
+            "Unsupported SQLite FTS5 experiment schema_version "
+            f"{payload.get('schema_version')!r}; expected "
+            f"{SQLITE_FTS_EXPERIMENT_SCHEMA_VERSION}"
+        )
+    name = _validated_experiment_name(payload)
+    description = _required_string(payload, "description")
+    project_root = _project_root(path, payload)
+    raw_weights = payload.get("field_weights")
+    if not isinstance(raw_weights, dict):
+        raise ValueError("field_weights must be a JSON object")
+    field_weights = normalize_sqlite_fts_field_weights(raw_weights)
+    benchmark = _required_mapping(payload, "benchmark")
+    _reject_unknown_fields(benchmark, "benchmark", {"trials", "topics", "qrels", "top_k"})
+    artifacts = _required_mapping(payload, "artifacts")
+    _reject_unknown_fields(
+        artifacts,
+        "artifacts",
+        {"index", "run", "metrics", "diagnostics"},
+    )
+    config_path = path.resolve()
+    try:
+        config_label = config_path.relative_to(project_root).as_posix()
+    except ValueError:
+        config_label = config_path.name
+    index_path = _project_path(project_root, artifacts, "index", "artifacts")
+    if index_path.suffix.lower() not in {".sqlite", ".sqlite3", ".db"}:
+        raise ValueError("artifacts.index must use a SQLite file suffix")
+    return SQLiteFtsExperiment(
+        name=name,
+        description=description,
+        field_weights=field_weights,
+        top_k=_positive_integer(benchmark, "top_k", prefix="benchmark."),
         trials_path=_project_path(project_root, benchmark, "trials", "benchmark"),
         topics_path=_project_path(project_root, benchmark, "topics", "benchmark"),
         qrels_path=_project_path(project_root, benchmark, "qrels", "benchmark"),

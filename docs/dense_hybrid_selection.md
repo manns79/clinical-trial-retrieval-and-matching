@@ -1,5 +1,9 @@
 # Dense and hybrid development selection
 
+> Historical experiment note: the original hybrid below uses the frozen Python BM25 run. Serving
+> now uses the development-validated SQLite FTS5 lexical component documented in
+> `docs/sqlite_fts5_selection.md`; the original result remains intact for reproducibility.
+
 ## Scope and selection rule
 
 This record uses only the deterministic 60-topic TREC 2021 development partition. The

@@ -13,8 +13,8 @@ ctmatch benchmark-serving \
 
 The command runs with Hugging Face and Transformers offline modes enabled. Build the dense index
 and cache the configured model before benchmarking. A fresh CLI process measures API import and
-resource preload once, performs deterministic warmups, and then interleaves lexical, dense, and
-hybrid requests to reduce run-order bias. Cold process startup may still benefit from the
+resource preload once, performs deterministic warmups, and then interleaves SQLite FTS5, dense,
+and hybrid requests to reduce run-order bias. Cold process startup may still benefit from the
 operating system filesystem cache.
 
 Configs and tracked summaries must contain only synthetic queries and aggregate measurements.

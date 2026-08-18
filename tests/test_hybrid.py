@@ -19,6 +19,18 @@ from clinical_trial_matching.retrieval.hybrid import (
 
 
 class ReciprocalRankFusionTest(unittest.TestCase):
+    def test_sqlite_hybrid_experiment_uses_development_inputs(self) -> None:
+        experiment = load_rrf_experiment(
+            Path(
+                "configs/experiments/trec_2021/"
+                "development_hybrid_rrf_sqlite_minilm.json"
+            )
+        )
+
+        self.assertIn("/development/", experiment.topics_path.as_posix())
+        self.assertNotIn("/holdout/", experiment.topics_path.as_posix())
+        self.assertEqual(experiment.components[0].name, "sqlite_fts5")
+
     def test_online_rrf_returns_component_ranks(self) -> None:
         fused = reciprocal_rank_fuse_results(
             [

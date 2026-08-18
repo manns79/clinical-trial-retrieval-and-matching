@@ -29,6 +29,10 @@ from clinical_trial_matching.retrieval.hybrid import (
     RankedResults,
     reciprocal_rank_fuse_results,
 )
+from clinical_trial_matching.retrieval.sqlite_fts import (
+    DEFAULT_SQLITE_FTS_FIELD_WEIGHTS,
+    load_or_build_sqlite_fts_retriever,
+)
 
 try:
     from fastapi import FastAPI, HTTPException, Request, Response
@@ -36,6 +40,7 @@ except ImportError as exc:  # pragma: no cover - import-time developer guidance
     raise RuntimeError("Install API dependencies with `python3 -m pip install -e .`.") from exc
 
 DEFAULT_TRIAL_CORPUS_PATH = "data/processed/clinicaltrials/studies.sample.jsonl"
+DEFAULT_SQLITE_FTS_INDEX_PATH = "data/indexes/studies_sample_sqlite_fts5.sqlite"
 DEFAULT_DENSE_MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
 DEFAULT_DENSE_TEXT_REPRESENTATION = "title_summary_conditions"
 DEFAULT_DENSE_BATCH_SIZE = 64
@@ -73,7 +78,9 @@ class SearchRequest(BaseModel):
     query: str = Field(min_length=1)
     top_k: int = Field(default=10, ge=1, le=100)
     snippet_chars: int = Field(default=240, ge=1, le=1000)
-    retriever: Literal["bm25", "fielded-bm25", "dense", "hybrid"] = "fielded-bm25"
+    retriever: Literal["bm25", "fielded-bm25", "sqlite-fts5", "dense", "hybrid"] = (
+        "sqlite-fts5"
+    )
 
 
 class SearchResponse(BaseModel):
@@ -149,9 +156,10 @@ def search(request: SearchRequest) -> SearchResponse:
     index_load_start_ms = now_ms()
     lexical_retriever = None
     dense_retriever = None
-    if request.retriever in {"bm25", "fielded-bm25", "hybrid"}:
-        lexical_name = request.retriever if request.retriever != "hybrid" else "fielded-bm25"
-        lexical_retriever = load_search_retriever(lexical_name)
+    if request.retriever in {"bm25", "fielded-bm25"}:
+        lexical_retriever = load_search_retriever(request.retriever)
+    elif request.retriever in {"sqlite-fts5", "hybrid"}:
+        lexical_retriever = load_sqlite_search_retriever()
     if request.retriever in {"dense", "hybrid"}:
         dense_retriever = load_dense_search_retriever()
     index_load_ms = elapsed_ms(index_load_start_ms)
@@ -160,12 +168,16 @@ def search(request: SearchRequest) -> SearchResponse:
     embedding_ms = 0.0
     fusion_ms = 0.0
     result_metadata: dict[str, dict[str, Any]] = {}
-    if request.retriever in {"bm25", "fielded-bm25"}:
+    if request.retriever in {"bm25", "fielded-bm25", "sqlite-fts5"}:
         assert lexical_retriever is not None
         lexical_start_ms = now_ms()
         results = lexical_retriever.search(request.query, top_k=request.top_k)
         lexical_ms = elapsed_ms(lexical_start_ms)
-        parameters = lexical_parameters(request.retriever, request.top_k)
+        parameters = (
+            sqlite_fts_parameters(lexical_retriever, request.top_k)
+            if request.retriever == "sqlite-fts5"
+            else lexical_parameters(request.retriever, request.top_k)
+        )
     elif request.retriever == "dense":
         assert dense_retriever is not None
         embedding_start_ms = now_ms()
@@ -188,7 +200,7 @@ def search(request: SearchRequest) -> SearchResponse:
         fusion_start_ms = now_ms()
         fused = reciprocal_rank_fuse_results(
             [
-                RankedResults("fielded-bm25", 1.0, tuple(lexical_results)),
+                RankedResults("sqlite-fts5", 1.0, tuple(lexical_results)),
                 RankedResults("dense", 1.0, tuple(dense_results)),
             ],
             rrf_k=get_rrf_k(),
@@ -242,6 +254,7 @@ def search(request: SearchRequest) -> SearchResponse:
             "bm25_index_path": get_bm25_index_path(
                 "bm25" if request.retriever == "bm25" else "fielded-bm25"
             ),
+            "sqlite_fts_index_path": str(get_sqlite_fts_index_path()),
             "dense_index_path": str(get_dense_index_path() or ""),
         },
     )
@@ -261,9 +274,11 @@ def metrics_health() -> dict[str, object]:
     corpus_path = get_trial_corpus_path()
     index_path = get_bm25_index_path()
     dense_index_path = get_dense_index_path()
+    sqlite_fts_index_path = get_sqlite_fts_index_path()
     corpus_exists = corpus_path.exists()
+    sqlite_fts_index_exists = sqlite_fts_index_path.exists()
     dense_index_exists = dense_index_path is not None and dense_index_path.exists()
-    available_retrievers = ["fielded-bm25", "bm25"]
+    available_retrievers = ["sqlite-fts5", "fielded-bm25", "bm25"]
     if corpus_exists and dense_index_exists:
         available_retrievers.extend(["dense", "hybrid"])
     return {
@@ -272,6 +287,8 @@ def metrics_health() -> dict[str, object]:
             "api": True,
             "trial_corpus_exists": corpus_exists,
             "bm25_index_exists": Path(index_path).exists() if index_path else False,
+            "sqlite_fts_index_exists": sqlite_fts_index_exists,
+            "sqlite_fts_retriever_loaded": load_sqlite_search_retriever.cache_info().currsize > 0,
             "dense_index_configured": dense_index_path is not None,
             "dense_index_exists": dense_index_exists,
             "dense_retriever_loaded": load_dense_search_retriever.cache_info().currsize > 0,
@@ -279,6 +296,7 @@ def metrics_health() -> dict[str, object]:
         "available_retrievers": available_retrievers,
         "trial_corpus_path": str(corpus_path),
         "bm25_index_path": index_path,
+        "sqlite_fts_index_path": str(sqlite_fts_index_path),
         "dense_index_path": str(dense_index_path or ""),
     }
 
@@ -291,6 +309,10 @@ def get_bm25_index_path(retriever_name: str = "fielded-bm25") -> str:
     if retriever_name == "bm25":
         return os.getenv("PLAIN_BM25_INDEX_PATH", "")
     return os.getenv("BM25_INDEX_PATH", "")
+
+
+def get_sqlite_fts_index_path() -> Path:
+    return Path(os.getenv("SQLITE_FTS_INDEX_PATH", DEFAULT_SQLITE_FTS_INDEX_PATH))
 
 
 def get_dense_index_path() -> Path | None:
@@ -351,6 +373,22 @@ def load_search_retriever(retriever_name: str) -> Any:
 
 
 @lru_cache(maxsize=1)
+def load_sqlite_search_retriever() -> Any:
+    try:
+        return load_or_build_sqlite_fts_retriever(
+            trials=load_trial_corpus(),
+            index_path=get_sqlite_fts_index_path(),
+            field_weights=DEFAULT_SQLITE_FTS_FIELD_WEIGHTS,
+            corpus_path=get_trial_corpus_path(),
+        )
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"SQLite FTS5 retriever could not be loaded: {exc}",
+        ) from exc
+
+
+@lru_cache(maxsize=1)
 def load_dense_search_retriever() -> Any:
     config = get_dense_serving_config()
     if not config.index_path.exists():
@@ -383,9 +421,9 @@ def preload_search_resources(
     trials = load_trial_corpus()
     if on_phase_complete is not None:
         on_phase_complete("corpus")
-    load_search_retriever("fielded-bm25")
+    load_sqlite_search_retriever()
     if on_phase_complete is not None:
-        on_phase_complete("fielded_bm25")
+        on_phase_complete("sqlite_fts5")
     dense_configured = get_dense_index_path() is not None
     if dense_configured:
         load_dense_search_retriever()
@@ -416,6 +454,16 @@ def lexical_parameters(retriever_name: str, top_k: int) -> dict[str, Any]:
     }
 
 
+def sqlite_fts_parameters(retriever: Any, top_k: int) -> dict[str, Any]:
+    return {
+        "top_k": top_k,
+        "field_weights": retriever.field_weights,
+        "tokenizer": retriever.metadata["tokenizer"],
+        "query_operator": retriever.metadata["query_operator"],
+        "query_stopwords": sorted(QUERY_STOPWORDS),
+    }
+
+
 def dense_parameters(retriever: Any, top_k: int) -> dict[str, Any]:
     metadata = retriever.index.metadata
     return {
@@ -438,9 +486,9 @@ def hybrid_parameters(
         "rrf_k": get_rrf_k(),
         "candidate_depth": candidate_depth,
         "components": {
-            "fielded-bm25": {
+            "sqlite-fts5": {
                 "weight": 1.0,
-                "field_weights": normalized_field_weights(SERVING_FIELD_WEIGHTS),
+                "field_weights": dict(DEFAULT_SQLITE_FTS_FIELD_WEIGHTS),
             },
             "dense": {"weight": 1.0, **dense_parameters(dense_retriever, candidate_depth)},
         },

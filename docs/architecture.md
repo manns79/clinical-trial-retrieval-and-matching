@@ -13,7 +13,8 @@ This keeps the portfolio artifact deployable without forcing paid database or mo
 
 - Ingestion: downloads or reads source records, records provenance, and normalizes trial fields.
 - Storage: Postgres for structured fields, full-text search, and eventually pgvector embeddings.
-- Retrieval: BM25 baseline, metadata filters, dense retrieval, hybrid fusion, and reranking.
+- Retrieval: BM25 evaluation baseline, SQLite FTS5 serving, metadata filters, dense retrieval,
+  hybrid fusion, and reranking.
 - Evaluation: TREC-style qrels, reproducible run files, and metrics such as Recall@100, nDCG, MRR, and Precision@k.
 - API: FastAPI service for search, trial lookup, health, and later explanation endpoints.
 - UI: Streamlit client over the FastAPI search and trial-detail endpoints.
@@ -26,9 +27,11 @@ This keeps the portfolio artifact deployable without forcing paid database or mo
 - `GET /trial/{nct_id}`
 - `GET /metrics/health` for lightweight operational checks
 
-`POST /search` supports plain BM25, the frozen field-aware BM25 profile, the selected local dense
-bi-encoder, and equal-weight reciprocal-rank fusion. It reads normalized trial JSONL from
-`TRIAL_CORPUS_PATH`. Dense and hybrid modes require a compatible ignored NumPy index configured
+`POST /search` supports SQLite FTS5, plain BM25, the frozen field-aware BM25 profile, the selected
+local dense bi-encoder, and equal-weight reciprocal-rank fusion. SQLite FTS5 is the default and
+the lexical component of hybrid retrieval; legacy Python BM25 remains available for comparison
+but is not preloaded. It reads normalized trial JSONL from `TRIAL_CORPUS_PATH`. Dense and hybrid
+modes require a compatible ignored NumPy index configured
 through `DENSE_INDEX_PATH`; the model and index are validated and loaded once in the FastAPI
 lifespan before requests are accepted. The service never builds corpus embeddings on a request.
 
@@ -49,7 +52,7 @@ models or retrieval locally.
 
 Docker Compose runs FastAPI, Streamlit, and Postgres/pgvector. The API image includes the optional
 dense dependencies, while the default Compose startup still seeds the small synthetic corpus and
-offers lexical search without downloading a model. Mounting compatible corpus/BM25/dense index
+offers SQLite lexical search without downloading a model. Mounting compatible corpus/SQLite/dense index
 paths enables dense and hybrid modes; Hugging Face model files are cached under ignored
 `data/models/`. The UI uses `API_BASE_URL=http://api:8000` inside the Compose network.
 
@@ -71,12 +74,12 @@ CI runs a tiny deterministic BM25 regression check over synthetic trial/topic/qr
 
 The tracked local serving benchmark uses the same environment contract and cached resources as
 FastAPI. It measures API import plus resource preload as cold start, performs deterministic
-warmups, and interleaves fielded BM25, dense, and hybrid requests over synthetic queries. Reports
+warmups, and interleaves SQLite FTS5, dense, and hybrid requests over synthetic queries. Reports
 capture handler and stage p50/p95 latency, sequential throughput, RSS, artifact sizes, and system
 metadata under ignored `outputs/` paths.
 
-Startup profiling checkpoints the process after API import, normalized corpus loading, fielded
-BM25 loading, and combined dense index/model loading. Each checkpoint reports elapsed time,
+Startup profiling checkpoints the process after API import, normalized corpus loading, SQLite
+FTS5 loading, and combined dense index/model loading. Each checkpoint reports elapsed time,
 retained RSS change, and observed peak RSS change. These deltas describe one process on one host;
 they can be influenced by allocator behavior and operating-system filesystem caches.
 

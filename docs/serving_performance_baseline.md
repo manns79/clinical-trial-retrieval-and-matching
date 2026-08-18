@@ -62,7 +62,7 @@ Fielded BM25 accounted for 78.05% of the positive retained RSS increase across r
 The 110.296 MiB pickle expands into Python counters, dictionaries, strings, tuples, and integer
 objects, confirming the lexical representation as the primary deployment-memory constraint.
 
-## Decision
+## 2026-08-17 decision
 
 Warm latency has plausible room for a small reranker, particularly after dense retrieval, but the
 current shared process already requires about 3.7 GiB RSS. Adding a cross-encoder now would increase
@@ -77,3 +77,23 @@ persisted index is compact enough that it is not the first optimization target.
 
 The detailed benchmark JSON remains an ignored local artifact and contains no patient records or
 search results.
+
+## SQLite FTS5 outcome
+
+On 2026-08-18, the development-quality and isolated resource comparisons supported replacing
+preloaded Python fielded BM25 with SQLite FTS5. The full serving benchmark was then rerun with
+SQLite FTS5, MiniLM, and the dense index loaded together.
+
+| measurement | Python BM25 serving | SQLite FTS5 serving |
+| --- | ---: | ---: |
+| lexical preload retained RSS MiB | 2,835.586 | 2.973 |
+| process peak RSS MiB | 3,733.715 | 1,119.102 |
+| lexical handler p50 ms | 146.128 | 111.962 |
+| lexical handler p95 ms | 180.478 | 142.086 |
+| hybrid handler p50 ms | 182.332 | 156.071 |
+| hybrid handler p95 ms | 241.202 | 176.460 |
+
+These values came from different fresh-process runs and may reflect filesystem-cache and host
+variance, but the memory result is large enough to be decisive. The dense index/model is now the
+dominant startup resource, retaining 814.586 MiB in the latest run. The detailed quality and
+isolated resource comparison is recorded in `docs/sqlite_fts5_selection.md`.

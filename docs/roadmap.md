@@ -51,7 +51,9 @@ Current dense retrieval status:
 - A repeatable local serving benchmark reports cold start, warm p50/p95 latency, sequential
   throughput, RSS, and artifact/model-cache sizes for lexical, dense, and hybrid modes.
 - Staged startup profiling identifies the expanded Python fielded BM25 index as the dominant
-  serving-memory contributor, making a compact lexical backend the next deployment task.
+  serving-memory contributor.
+- A local SQLite FTS5 prototype preserves competitive development quality, reduces lexical
+  retained RSS from about 2.8 GiB to about 3 MiB, and is now the default/hybrid serving backend.
 
 ## Milestone 4: Reranking
 

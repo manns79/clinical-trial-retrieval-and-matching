@@ -18,9 +18,9 @@ from typing import Any, Literal, Protocol, cast
 from clinical_trial_matching.io import write_json
 
 SERVING_BENCHMARK_SCHEMA_VERSION = 1
-PRIMARY_MODES = ("fielded-bm25", "dense", "hybrid")
+PRIMARY_MODES = ("sqlite-fts5", "dense", "hybrid")
 STAGE_NAMES = ("lexical", "embedding", "fusion", "total")
-STARTUP_RESOURCE_PHASES = ("corpus", "fielded_bm25", "dense_index_and_model")
+STARTUP_RESOURCE_PHASES = ("corpus", "sqlite_fts5", "dense_index_and_model")
 
 
 @dataclass(frozen=True)
@@ -29,7 +29,7 @@ class ServingBenchmark:
     description: str
     project_root: Path
     corpus_path: Path
-    bm25_index_path: Path
+    sqlite_fts_index_path: Path
     dense_index_path: Path
     dense_model_name: str
     dense_text_representation: str
@@ -52,7 +52,7 @@ class ServingBenchmark:
     def environment(self) -> dict[str, str]:
         return {
             "TRIAL_CORPUS_PATH": str(self.corpus_path),
-            "BM25_INDEX_PATH": str(self.bm25_index_path),
+            "SQLITE_FTS_INDEX_PATH": str(self.sqlite_fts_index_path),
             "DENSE_INDEX_PATH": str(self.dense_index_path),
             "DENSE_MODEL_NAME": self.dense_model_name,
             "DENSE_TEXT_REPRESENTATION": self.dense_text_representation,
@@ -126,7 +126,13 @@ class ApiServingRuntime:
                 top_k=top_k,
                 snippet_chars=snippet_chars,
                 retriever=cast(
-                    Literal["bm25", "fielded-bm25", "dense", "hybrid"],
+                    Literal[
+                        "bm25",
+                        "fielded-bm25",
+                        "sqlite-fts5",
+                        "dense",
+                        "hybrid",
+                    ],
                     mode,
                 ),
             )
@@ -174,7 +180,7 @@ def load_serving_benchmark(path: Path) -> ServingBenchmark:
         "serving",
         {
             "corpus",
-            "bm25_index",
+            "sqlite_fts_index",
             "dense_index",
             "dense_model_name",
             "dense_text_representation",
@@ -228,7 +234,12 @@ def load_serving_benchmark(path: Path) -> ServingBenchmark:
         description=description,
         project_root=project_root,
         corpus_path=_project_path(project_root, serving, "corpus", "serving"),
-        bm25_index_path=_project_path(project_root, serving, "bm25_index", "serving"),
+        sqlite_fts_index_path=_project_path(
+            project_root,
+            serving,
+            "sqlite_fts_index",
+            "serving",
+        ),
         dense_index_path=_project_path(project_root, serving, "dense_index", "serving"),
         dense_model_name=_required_string(serving, "dense_model_name", "serving."),
         dense_text_representation=_required_string(
@@ -575,7 +586,10 @@ def memory_report(
 def serving_artifact_sizes(benchmark: ServingBenchmark) -> dict[str, Any]:
     files = {
         "corpus": _file_measure(benchmark.corpus_path, benchmark.project_root),
-        "bm25_index": _file_measure(benchmark.bm25_index_path, benchmark.project_root),
+        "sqlite_fts_index": _file_measure(
+            benchmark.sqlite_fts_index_path,
+            benchmark.project_root,
+        ),
         "dense_index": _file_measure(benchmark.dense_index_path, benchmark.project_root),
     }
     model_cache_path = huggingface_model_cache_path(benchmark.dense_model_name)
@@ -644,7 +658,7 @@ def _validate_artifacts_exist(benchmark: ServingBenchmark) -> None:
         path
         for path in (
             benchmark.corpus_path,
-            benchmark.bm25_index_path,
+            benchmark.sqlite_fts_index_path,
             benchmark.dense_index_path,
         )
         if not path.is_file()

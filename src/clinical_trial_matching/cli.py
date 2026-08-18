@@ -3,6 +3,11 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+from clinical_trial_matching.benchmarking.lexical import (
+    benchmark_lexical_backend,
+    compare_lexical_backend_reports,
+    write_lexical_backend_comparison,
+)
 from clinical_trial_matching.benchmarking.serving import (
     load_serving_benchmark,
     run_serving_benchmark,
@@ -17,6 +22,7 @@ from clinical_trial_matching.evaluation.experiments import (
     load_bm25_experiment,
     load_dense_experiment,
     load_rrf_experiment,
+    load_sqlite_fts_experiment,
 )
 from clinical_trial_matching.evaluation.metrics import summarize_run
 from clinical_trial_matching.evaluation.regression import (
@@ -33,6 +39,7 @@ from clinical_trial_matching.evaluation.trec import (
     bm25_trec_topic_diagnostics,
     build_bm25_trec_run,
     build_dense_trec_run,
+    build_sqlite_fts_trec_run,
     trec_evaluation_report,
     trec_topic_diagnostics,
     write_trec_run,
@@ -81,6 +88,11 @@ from clinical_trial_matching.retrieval.hybrid import (
     RankedRun,
     read_trec_rankings,
     reciprocal_rank_fusion,
+)
+from clinical_trial_matching.retrieval.sqlite_fts import (
+    SQLITE_FTS_RETRIEVER_NAME,
+    build_sqlite_fts_index,
+    load_or_build_sqlite_fts_retriever,
 )
 from clinical_trial_matching.validation.trials import summarize_trial_corpus
 
@@ -239,6 +251,26 @@ def main() -> None:
         help="Rebuild the configured index even when a compatible cached index exists.",
     )
 
+    sqlite_fts_experiment = subparsers.add_parser(
+        "run-sqlite-fts-experiment",
+        help="Run a reproducible SQLite FTS5 benchmark from a versioned experiment config.",
+    )
+    sqlite_fts_experiment.add_argument("--config", type=Path, required=True)
+    sqlite_fts_experiment.add_argument("--rebuild-index", action="store_true")
+
+    sqlite_fts_index = subparsers.add_parser(
+        "build-sqlite-fts-index",
+        help="Build a disk-backed SQLite FTS5 index for a normalized trial corpus.",
+    )
+    sqlite_fts_index.add_argument("--trials", type=Path, required=True)
+    sqlite_fts_index.add_argument("--output", type=Path, required=True)
+    sqlite_fts_index.add_argument(
+        "--field-weight",
+        action="append",
+        default=[],
+        help="Required field=weight values for the five FTS5 text fields.",
+    )
+
     dense_index = subparsers.add_parser(
         "build-dense-index",
         help="Embed a normalized trial corpus and persist a reusable NumPy dense index.",
@@ -304,6 +336,27 @@ def main() -> None:
         help="Measure local serving startup, latency, throughput, memory, and artifact sizes.",
     )
     serving_benchmark.add_argument("--config", type=Path, required=True)
+
+    lexical_benchmark = subparsers.add_parser(
+        "benchmark-lexical-backend",
+        help="Measure cold start, memory, latency, and size for one lexical backend.",
+    )
+    lexical_benchmark.add_argument("--serving-config", type=Path, required=True)
+    lexical_benchmark.add_argument(
+        "--backend",
+        choices=["fielded-bm25", "sqlite-fts5"],
+        required=True,
+    )
+    lexical_benchmark.add_argument("--experiment-config", type=Path, required=True)
+    lexical_benchmark.add_argument("--output", type=Path, required=True)
+
+    lexical_comparison = subparsers.add_parser(
+        "compare-lexical-backends",
+        help="Compare fielded BM25 and SQLite FTS5 resource benchmark reports.",
+    )
+    lexical_comparison.add_argument("--baseline", type=Path, required=True)
+    lexical_comparison.add_argument("--candidate", type=Path, required=True)
+    lexical_comparison.add_argument("--output", type=Path, required=True)
 
     trec_topics = subparsers.add_parser(
         "ingest-trec-topics", help="Normalize TREC Clinical Trials topics XML to JSONL."
@@ -443,6 +496,14 @@ def main() -> None:
         )
     elif args.command == "run-bm25-experiment":
         run_bm25_experiment(args.config, rebuild_index=args.rebuild_index)
+    elif args.command == "run-sqlite-fts-experiment":
+        run_sqlite_fts_experiment(args.config, rebuild_index=args.rebuild_index)
+    elif args.command == "build-sqlite-fts-index":
+        build_sqlite_fts_index_command(
+            trials_path=args.trials,
+            output_path=args.output,
+            field_weights=parse_field_weights(args.field_weight),
+        )
     elif args.command == "build-dense-index":
         build_dense_index_command(
             trials_path=args.trials,
@@ -484,6 +545,19 @@ def main() -> None:
         )
     elif args.command == "benchmark-serving":
         benchmark_serving(args.config)
+    elif args.command == "benchmark-lexical-backend":
+        benchmark_lexical_backend_command(
+            serving_config_path=args.serving_config,
+            backend=args.backend,
+            experiment_config_path=args.experiment_config,
+            output_path=args.output,
+        )
+    elif args.command == "compare-lexical-backends":
+        compare_lexical_backends(
+            baseline_path=args.baseline,
+            candidate_path=args.candidate,
+            output_path=args.output,
+        )
     elif args.command == "ingest-trec-topics":
         ingest_trec_topics(args.year, args.input, args.output)
     elif args.command == "ingest-trec-qrels":
@@ -925,6 +999,87 @@ def run_bm25_experiment(config_path: Path, *, rebuild_index: bool = False) -> No
     )
 
 
+def run_sqlite_fts_experiment(
+    config_path: Path,
+    *,
+    rebuild_index: bool = False,
+) -> None:
+    experiment = load_sqlite_fts_experiment(config_path)
+    print(
+        f"Running SQLite FTS5 experiment {experiment.name} "
+        f"from {experiment.config_label}"
+    )
+    trials = [trial_from_flat_record(row) for row in read_jsonl(experiment.trials_path)]
+    topics = [topic_from_json_record(row) for row in read_jsonl(experiment.topics_path)]
+    qrels = read_qrels_records(experiment.qrels_path)
+    retriever = load_or_build_sqlite_fts_retriever(
+        trials=trials,
+        index_path=experiment.index_path,
+        field_weights=experiment.field_weights,
+        corpus_path=experiment.trials_path,
+        rebuild_index=rebuild_index,
+    )
+    rows = build_sqlite_fts_trec_run(
+        retriever=retriever,
+        topics=topics,
+        run_name=experiment.name,
+        top_k=experiment.top_k,
+    )
+    write_trec_run(experiment.run_output_path, rows)
+    parameters = {
+        "field_weights": experiment.field_weights,
+        "index_schema_version": retriever.metadata["schema_version"],
+        "tokenizer": retriever.metadata["tokenizer"],
+        "query_operator": retriever.metadata["query_operator"],
+        "corpus_fingerprint": retriever.metadata["corpus"]["fingerprint"],
+    }
+    report = trec_evaluation_report(
+        rows=rows,
+        qrels=qrels,
+        run_name=experiment.name,
+        top_k=experiment.top_k,
+        topics_count=len(topics),
+        trials_count=len(trials),
+        retriever_name=SQLITE_FTS_RETRIEVER_NAME,
+        retriever_parameters=parameters,
+    )
+    report["experiment"] = experiment.metadata()
+    write_json(experiment.metrics_output_path, report)
+    diagnostics = trec_topic_diagnostics(
+        rows=rows,
+        qrels=qrels,
+        topics=topics,
+        run_name=experiment.name,
+        top_k=experiment.top_k,
+        retriever_name=SQLITE_FTS_RETRIEVER_NAME,
+        retriever_parameters=parameters,
+    )
+    diagnostics["experiment"] = experiment.metadata()
+    write_json(experiment.diagnostics_output_path, diagnostics)
+    print(f"Wrote TREC SQLite FTS5 run file to {experiment.run_output_path}")
+    print(f"Wrote TREC SQLite FTS5 metrics report to {experiment.metrics_output_path}")
+    print(f"Wrote TREC SQLite FTS5 diagnostics to {experiment.diagnostics_output_path}")
+
+
+def build_sqlite_fts_index_command(
+    *,
+    trials_path: Path,
+    output_path: Path,
+    field_weights: dict[str, float],
+) -> None:
+    trials = [trial_from_flat_record(row) for row in read_jsonl(trials_path)]
+    metadata = build_sqlite_fts_index(
+        output_path,
+        trials,
+        field_weights=field_weights or None,
+        corpus_path=trials_path,
+    )
+    print(
+        f"Wrote SQLite FTS5 index for {metadata['corpus']['trials']} trials "
+        f"to {output_path}"
+    )
+
+
 def build_dense_index_command(
     *,
     trials_path: Path,
@@ -1176,6 +1331,58 @@ def benchmark_serving(config_path: Path) -> None:
             f"{mode}: p50={latency['p50']} ms p95={latency['p95']} ms "
             f"throughput={mode_report['sequential_requests_per_second']} req/s"
         )
+
+
+def benchmark_lexical_backend_command(
+    *,
+    serving_config_path: Path,
+    backend: str,
+    experiment_config_path: Path,
+    output_path: Path,
+) -> None:
+    serving = load_serving_benchmark(serving_config_path)
+    if backend == "fielded-bm25":
+        experiment = load_bm25_experiment(experiment_config_path)
+        index_path = experiment.index_path
+        field_weights = experiment.field_weights
+    elif backend == "sqlite-fts5":
+        experiment = load_sqlite_fts_experiment(experiment_config_path)
+        index_path = experiment.index_path
+        field_weights = experiment.field_weights
+    else:
+        raise ValueError(f"Unsupported lexical backend: {backend}")
+    if experiment.trials_path != serving.corpus_path:
+        raise ValueError("Lexical experiment and serving benchmark corpus paths must match")
+    report = benchmark_lexical_backend(
+        backend=backend,
+        corpus_path=serving.corpus_path,
+        index_path=index_path,
+        field_weights=field_weights,
+        queries=serving.queries,
+        warmup_rounds=serving.warmup_rounds,
+        measurement_rounds=serving.measurement_rounds,
+        top_k=serving.top_k,
+        output_path=output_path,
+    )
+    retriever_phase = report["cold_start"]["phases"][1]
+    latency = report["warm"]["latency_ms"]
+    print(f"Wrote {backend} lexical benchmark to {output_path}")
+    print(
+        f"{backend}: cold={report['cold_start']['milliseconds']} ms | "
+        f"retriever RSS delta={retriever_phase['retained_rss_delta']['mib']} MiB | "
+        f"p50={latency['p50']} ms | p95={latency['p95']} ms"
+    )
+
+
+def compare_lexical_backends(
+    *,
+    baseline_path: Path,
+    candidate_path: Path,
+    output_path: Path,
+) -> None:
+    comparison = compare_lexical_backend_reports(baseline_path, candidate_path)
+    write_lexical_backend_comparison(output_path, comparison)
+    print(f"Wrote lexical backend comparison to {output_path}")
 
 
 def read_qrels(path: Path) -> dict[str, dict[str, int]]:

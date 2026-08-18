@@ -21,16 +21,19 @@ class ApiSearchTest(unittest.TestCase):
         from clinical_trial_matching.api.main import (
             load_dense_search_retriever,
             load_search_retriever,
+            load_sqlite_search_retriever,
             load_trial_corpus,
         )
 
         load_trial_corpus.cache_clear()
         load_search_retriever.cache_clear()
+        load_sqlite_search_retriever.cache_clear()
         load_dense_search_retriever.cache_clear()
         self.environment_names = (
             "TRIAL_CORPUS_PATH",
             "BM25_INDEX_PATH",
             "PLAIN_BM25_INDEX_PATH",
+            "SQLITE_FTS_INDEX_PATH",
             "DENSE_INDEX_PATH",
             "DENSE_MODEL_NAME",
             "DENSE_TEXT_REPRESENTATION",
@@ -48,6 +51,7 @@ class ApiSearchTest(unittest.TestCase):
         from clinical_trial_matching.api.main import (
             load_dense_search_retriever,
             load_search_retriever,
+            load_sqlite_search_retriever,
             load_trial_corpus,
         )
 
@@ -58,10 +62,16 @@ class ApiSearchTest(unittest.TestCase):
                 os.environ[name] = previous_value
         load_trial_corpus.cache_clear()
         load_search_retriever.cache_clear()
+        load_sqlite_search_retriever.cache_clear()
         load_dense_search_retriever.cache_clear()
 
-    def test_search_returns_traceable_bm25_records_from_configured_corpus(self) -> None:
-        from clinical_trial_matching.api.main import SearchRequest, load_trial_corpus, search
+    def test_search_returns_traceable_sqlite_records_from_configured_corpus(self) -> None:
+        from clinical_trial_matching.api.main import (
+            SearchRequest,
+            load_sqlite_search_retriever,
+            load_trial_corpus,
+            search,
+        )
 
         with tempfile.TemporaryDirectory() as tmpdir:
             corpus_path = Path(tmpdir) / "trials.jsonl"
@@ -89,7 +99,9 @@ class ApiSearchTest(unittest.TestCase):
                 ],
             )
             os.environ["TRIAL_CORPUS_PATH"] = str(corpus_path)
+            os.environ["SQLITE_FTS_INDEX_PATH"] = str(Path(tmpdir) / "trials.sqlite")
             load_trial_corpus.cache_clear()
+            load_sqlite_search_retriever.cache_clear()
 
             response = search(
                 SearchRequest(
@@ -99,7 +111,7 @@ class ApiSearchTest(unittest.TestCase):
             )
 
         payload = response.model_dump()
-        self.assertEqual(payload["retriever"], "fielded-bm25")
+        self.assertEqual(payload["retriever"], "sqlite-fts5")
         self.assertEqual(payload["corpus"], {"trials": 2, "unique_nct_ids": 2})
         self.assertEqual(payload["results"][0]["nct_id"], "NCT1")
         self.assertEqual(payload["results"][0]["rank"], 1)
@@ -174,7 +186,7 @@ class ApiSearchTest(unittest.TestCase):
             )
             with (
                 patch(
-                    "clinical_trial_matching.api.main.load_search_retriever",
+                    "clinical_trial_matching.api.main.load_sqlite_search_retriever",
                     return_value=lexical_retriever,
                 ),
                 patch(
@@ -191,7 +203,7 @@ class ApiSearchTest(unittest.TestCase):
         self.assertEqual(payload["parameters"]["rrf_k"], 60)
         self.assertEqual(
             payload["results"][0]["component_ranks"],
-            {"fielded-bm25": 1, "dense": 2},
+            {"sqlite-fts5": 1, "dense": 2},
         )
         self.assertGreaterEqual(payload["latency_ms"]["lexical"], 0)
         self.assertGreaterEqual(payload["latency_ms"]["embedding"], 0)
@@ -261,7 +273,7 @@ class ApiSearchTest(unittest.TestCase):
                 "clinical_trial_matching.api.main.load_trial_corpus",
                 return_value=(Trial(nct_id="NCT1", title="Fixture"),),
             ),
-            patch("clinical_trial_matching.api.main.load_search_retriever"),
+            patch("clinical_trial_matching.api.main.load_sqlite_search_retriever"),
             patch(
                 "clinical_trial_matching.api.main.get_dense_index_path",
                 return_value=Path("dense.npz"),
@@ -272,14 +284,17 @@ class ApiSearchTest(unittest.TestCase):
 
         self.assertEqual(
             completed,
-            ["corpus", "fielded_bm25", "dense_index_and_model"],
+            ["corpus", "sqlite_fts5", "dense_index_and_model"],
         )
 
     def test_health_only_advertises_dense_modes_when_index_is_configured(self) -> None:
         from clinical_trial_matching.api.main import metrics_health
 
         without_dense = metrics_health()
-        self.assertEqual(without_dense["available_retrievers"], ["fielded-bm25", "bm25"])
+        self.assertEqual(
+            without_dense["available_retrievers"],
+            ["sqlite-fts5", "fielded-bm25", "bm25"],
+        )
 
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -292,7 +307,7 @@ class ApiSearchTest(unittest.TestCase):
 
         self.assertEqual(
             with_dense["available_retrievers"],
-            ["fielded-bm25", "bm25", "dense", "hybrid"],
+            ["sqlite-fts5", "fielded-bm25", "bm25", "dense", "hybrid"],
         )
 
     def test_timing_middleware_adds_process_time_header(self) -> None:

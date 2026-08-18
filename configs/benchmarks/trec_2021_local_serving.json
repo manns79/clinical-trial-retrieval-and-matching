@@ -5,7 +5,7 @@
   "project_root": "../..",
   "serving": {
     "corpus": "data/processed/clinicaltrials/trec_2021_qrels_trials.jsonl",
-    "bm25_index": "data/indexes/trec_2021_fielded_bm25_condition_title_v1.pkl",
+    "sqlite_fts_index": "data/indexes/trec_2021_sqlite_fts5_condition_title_v1.sqlite",
     "dense_index": "data/indexes/trec_2021_dense_all_minilm_l6_v2_title_summary_conditions.npz",
     "dense_model_name": "sentence-transformers/all-MiniLM-L6-v2",
     "dense_text_representation": "title_summary_conditions",
@@ -17,7 +17,7 @@
   },
   "benchmark": {
     "modes": [
-      "fielded-bm25",
+      "sqlite-fts5",
       "dense",
       "hybrid"
     ],

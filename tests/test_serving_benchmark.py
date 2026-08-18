@@ -25,7 +25,7 @@ class FakeServingRuntime:
 
     def preload(self, on_phase_complete: Any = None) -> None:
         self.preload_calls += 1
-        for phase in ("corpus", "fielded_bm25", "dense_index_and_model"):
+        for phase in ("corpus", "sqlite_fts5", "dense_index_and_model"):
             if on_phase_complete is not None:
                 on_phase_complete(phase)
 
@@ -39,7 +39,7 @@ class FakeServingRuntime:
     ) -> dict[str, Any]:
         self.search_calls.append((query, mode))
         stage_values = {
-            "fielded-bm25": {"lexical": 1.0, "embedding": 0.0, "fusion": 0.0},
+            "sqlite-fts5": {"lexical": 1.0, "embedding": 0.0, "fusion": 0.0},
             "dense": {"lexical": 0.0, "embedding": 2.0, "fusion": 0.0},
             "hybrid": {"lexical": 1.0, "embedding": 2.0, "fusion": 0.5},
         }[mode]
@@ -88,7 +88,7 @@ class ServingBenchmarkTest(unittest.TestCase):
             root = Path(tmpdir)
             for name, content in (
                 ("trials.jsonl", "{}\n"),
-                ("bm25.pkl", "lexical"),
+                ("fts.sqlite", "lexical"),
                 ("dense.npz", "dense"),
             ):
                 (root / name).write_text(content, encoding="utf-8")
@@ -113,7 +113,7 @@ class ServingBenchmarkTest(unittest.TestCase):
         self.assertEqual(report["cost"]["hosted_service_cost_usd"], 0.0)
         self.assertEqual(
             [phase["name"] for phase in report["cold_start"]["phases"]],
-            ["api_import", "corpus", "fielded_bm25", "dense_index_and_model"],
+            ["api_import", "corpus", "sqlite_fts5", "dense_index_and_model"],
         )
         self.assertEqual(persisted["benchmark"]["name"], "fixture_serving")
         self.assertEqual(persisted["artifacts"]["files"]["dense_index"]["bytes"], 5)
@@ -166,7 +166,7 @@ class ServingBenchmarkTest(unittest.TestCase):
 
     def test_startup_phase_reports_retained_and_peak_rss_deltas(self) -> None:
         phase = startup_phase_report(
-            name="fielded_bm25",
+            name="sqlite_fts5",
             elapsed_ms=123.4567,
             before={"rss_bytes": 100, "peak_rss_bytes": 120},
             after={"rss_bytes": 160, "peak_rss_bytes": 210},
@@ -180,7 +180,7 @@ class ServingBenchmarkTest(unittest.TestCase):
         phases = [
             {"name": "api_import", "retained_rss_delta": {"bytes": 500}},
             {"name": "corpus", "retained_rss_delta": {"bytes": 100}},
-            {"name": "fielded_bm25", "retained_rss_delta": {"bytes": 300}},
+            {"name": "sqlite_fts5", "retained_rss_delta": {"bytes": 300}},
             {
                 "name": "dense_index_and_model",
                 "retained_rss_delta": {"bytes": 100},
@@ -189,7 +189,7 @@ class ServingBenchmarkTest(unittest.TestCase):
 
         dominant = dominant_startup_resource_phase(phases)
 
-        self.assertEqual(dominant["name"], "fielded_bm25")
+        self.assertEqual(dominant["name"], "sqlite_fts5")
         self.assertEqual(dominant["share_of_positive_resource_delta"], 0.6)
 
 
@@ -201,7 +201,7 @@ def serving_benchmark_payload() -> dict[str, Any]:
         "project_root": ".",
         "serving": {
             "corpus": "trials.jsonl",
-            "bm25_index": "bm25.pkl",
+            "sqlite_fts_index": "fts.sqlite",
             "dense_index": "dense.npz",
             "dense_model_name": "fixture-model",
             "dense_text_representation": "title_summary_conditions",

@@ -15,6 +15,7 @@ from clinical_trial_matching.retrieval.bm25 import (
     normalized_field_weights,
 )
 from clinical_trial_matching.retrieval.dense import DenseRetriever
+from clinical_trial_matching.retrieval.sqlite_fts import SQLiteFtsRetriever
 
 
 @dataclass(frozen=True)
@@ -106,6 +107,32 @@ def build_dense_trec_run(
         for topic, results in zip(topic_list, rankings, strict=True)
         for result in results
     ]
+
+
+def build_sqlite_fts_trec_run(
+    *,
+    retriever: SQLiteFtsRetriever,
+    topics: Iterable[Topic],
+    run_name: str,
+    top_k: int = 100,
+) -> list[TrecRunRow]:
+    if top_k < 1:
+        raise ValueError("Top-K must be at least 1")
+    if not run_name.strip():
+        raise ValueError("Run name cannot be empty")
+    rows: list[TrecRunRow] = []
+    for topic in topics:
+        for result in retriever.search(topic.text, top_k=top_k):
+            rows.append(
+                TrecRunRow(
+                    topic_id=topic.topic_id,
+                    nct_id=result.nct_id,
+                    rank=result.rank,
+                    score=result.score,
+                    run_name=run_name,
+                )
+            )
+    return rows
 
 
 def write_trec_run(path: Path, rows: Iterable[TrecRunRow]) -> None:

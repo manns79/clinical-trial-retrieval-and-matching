@@ -98,20 +98,21 @@ def render_health(api_base_url: str) -> dict[str, Any] | None:
 
 def available_retrievers(health: dict[str, Any] | None) -> list[str]:
     if not health:
-        return ["fielded-bm25", "bm25"]
+        return ["sqlite-fts5"]
     values = health.get("available_retrievers")
     if not isinstance(values, list):
-        return ["fielded-bm25", "bm25"]
+        return ["sqlite-fts5"]
     supported = [
         value
         for value in values
-        if value in {"fielded-bm25", "bm25", "dense", "hybrid"}
+        if value in {"sqlite-fts5", "fielded-bm25", "bm25", "dense", "hybrid"}
     ]
-    return supported or ["fielded-bm25", "bm25"]
+    return supported or ["sqlite-fts5"]
 
 
 def retriever_label(retriever: str) -> str:
     return {
+        "sqlite-fts5": "SQLite FTS5",
         "fielded-bm25": "Fielded BM25",
         "bm25": "Plain BM25",
         "dense": "Dense bi-encoder",

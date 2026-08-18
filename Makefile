@@ -1,7 +1,7 @@
 PYTHON ?= python3
 PYTHONPATH ?= src
 
-.PHONY: install install-dev install-ui install-dense test compile ingest-sample ingest-ctgov-sample report-ctgov-sample search-ctgov-sample download-ctgov-small build-trec-corpus-smoke build-bm25-index-sample evaluate-baseline evaluate-trec-bm25-sample compare-metrics-sample split-trec-2021-topics run-trec-2021-bm25 run-trec-2021-fielded-bm25 run-trec-2021-fielded-bm25-candidate compare-trec-2021-bm25 evaluate-trec-2021-lexical-holdout run-trec-2021-dense run-trec-2021-dense-biomedical compare-trec-2021-dense-ablation compare-trec-2021-lexical-dense run-trec-2021-hybrid compare-trec-2021-retrievers benchmark-trec-2021-serving check-retrieval-regression ingest-trec-sample validate-trec-sample write-manifest-sample api ui docker-up docker-down docker-smoke clean
+.PHONY: install install-dev install-ui install-dense test compile ingest-sample ingest-ctgov-sample report-ctgov-sample search-ctgov-sample download-ctgov-small build-trec-corpus-smoke build-bm25-index-sample evaluate-baseline evaluate-trec-bm25-sample compare-metrics-sample split-trec-2021-topics run-trec-2021-bm25 run-trec-2021-fielded-bm25 run-trec-2021-fielded-bm25-candidate run-trec-2021-sqlite-fts5 compare-trec-2021-bm25 compare-trec-2021-lexical-backends evaluate-trec-2021-lexical-holdout run-trec-2021-dense run-trec-2021-dense-biomedical compare-trec-2021-dense-ablation compare-trec-2021-lexical-dense run-trec-2021-hybrid run-trec-2021-hybrid-sqlite compare-trec-2021-retrievers compare-trec-2021-hybrid-backends benchmark-trec-2021-serving benchmark-trec-2021-lexical-backends check-retrieval-regression ingest-trec-sample validate-trec-sample write-manifest-sample api ui docker-up docker-down docker-smoke clean
 
 install:
 	$(PYTHON) -m pip install -e .
@@ -119,6 +119,18 @@ run-trec-2021-fielded-bm25-candidate:
 	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m clinical_trial_matching.cli run-bm25-experiment \
 		--config configs/experiments/trec_2021/fielded_bm25_condition_title_v1.json
 
+run-trec-2021-sqlite-fts5:
+	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m clinical_trial_matching.cli run-sqlite-fts-experiment \
+		--config configs/experiments/trec_2021/development_sqlite_fts5_condition_title_v1.json
+
+compare-trec-2021-lexical-backends:
+	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m clinical_trial_matching.cli compare-metrics \
+		--metrics frozen_lexical=outputs/trec_2021_development_fielded_bm25_condition_title_v1_metrics.json \
+		--metrics sqlite_fts5=outputs/trec_2021_development_sqlite_fts5_condition_title_v1_metrics.json \
+		--output outputs/trec_2021_development_lexical_backend_comparison.md \
+		--view eligible_only \
+		--view excluded_or_eligible
+
 compare-trec-2021-bm25:
 	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m clinical_trial_matching.cli compare-metrics \
 		--metrics plain_bm25=outputs/trec_2021_development_plain_bm25_metrics.json \
@@ -160,6 +172,18 @@ run-trec-2021-hybrid:
 	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m clinical_trial_matching.cli run-rrf-experiment \
 		--config configs/experiments/trec_2021/development_hybrid_rrf_lexical_minilm.json
 
+run-trec-2021-hybrid-sqlite:
+	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m clinical_trial_matching.cli run-rrf-experiment \
+		--config configs/experiments/trec_2021/development_hybrid_rrf_sqlite_minilm.json
+
+compare-trec-2021-hybrid-backends:
+	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m clinical_trial_matching.cli compare-metrics \
+		--metrics bm25_hybrid=outputs/trec_2021_development_hybrid_rrf_lexical_minilm_metrics.json \
+		--metrics sqlite_hybrid=outputs/trec_2021_development_hybrid_rrf_sqlite_minilm_metrics.json \
+		--output outputs/trec_2021_development_hybrid_backend_comparison.md \
+		--view eligible_only \
+		--view excluded_or_eligible
+
 compare-trec-2021-retrievers:
 	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m clinical_trial_matching.cli compare-metrics \
 		--metrics frozen_lexical=outputs/trec_2021_development_fielded_bm25_condition_title_v1_metrics.json \
@@ -172,6 +196,22 @@ compare-trec-2021-retrievers:
 benchmark-trec-2021-serving:
 	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m clinical_trial_matching.cli benchmark-serving \
 		--config configs/benchmarks/trec_2021_local_serving.json
+
+benchmark-trec-2021-lexical-backends:
+	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m clinical_trial_matching.cli benchmark-lexical-backend \
+		--serving-config configs/benchmarks/trec_2021_local_serving.json \
+		--backend fielded-bm25 \
+		--experiment-config configs/experiments/trec_2021/fielded_bm25_condition_title_v1.json \
+		--output outputs/trec_2021_fielded_bm25_resource_benchmark.json
+	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m clinical_trial_matching.cli benchmark-lexical-backend \
+		--serving-config configs/benchmarks/trec_2021_local_serving.json \
+		--backend sqlite-fts5 \
+		--experiment-config configs/experiments/trec_2021/development_sqlite_fts5_condition_title_v1.json \
+		--output outputs/trec_2021_sqlite_fts5_resource_benchmark.json
+	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m clinical_trial_matching.cli compare-lexical-backends \
+		--baseline outputs/trec_2021_fielded_bm25_resource_benchmark.json \
+		--candidate outputs/trec_2021_sqlite_fts5_resource_benchmark.json \
+		--output outputs/trec_2021_lexical_backend_resource_comparison.md
 
 check-retrieval-regression:
 	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m clinical_trial_matching.cli check-retrieval-regression \

@@ -57,7 +57,7 @@ class UiApiClientTest(unittest.TestCase):
                         "query": "asthma",
                         "top_k": 5,
                         "snippet_chars": 120,
-                        "retriever": "fielded-bm25",
+                        "retriever": "sqlite-fts5",
                     },
                 )
             ],

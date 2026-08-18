@@ -180,6 +180,8 @@ make run-trec-2021-bm25
 make run-trec-2021-fielded-bm25
 make run-trec-2021-fielded-bm25-candidate
 make compare-trec-2021-bm25
+make run-trec-2021-sqlite-fts5
+make compare-trec-2021-lexical-backends
 ```
 
 The split command uses seeded SHA-256 ranking to assign exactly 20% of topics to holdout. For
@@ -210,6 +212,14 @@ The lexical selection rationale, frozen weights, and aggregate holdout result ar
 [`docs/lexical_baseline_selection.md`](docs/lexical_baseline_selection.md). The holdout config is
 kept for reproducibility; its result is not used for further lexical tuning.
 
+The serving optimization experiment persists title, brief summary, conditions, interventions,
+and eligibility criteria in a local SQLite FTS5 index. It uses the selected condition/title-heavy
+weights, reads development topics only, and writes all database/run/report artifacts under ignored
+paths. Build and evaluate it with `make run-trec-2021-sqlite-fts5`; compare isolated cold start,
+RSS, warm latency, throughput, and disk size with `make benchmark-trec-2021-lexical-backends`.
+The aggregate selection record is in
+[`docs/sqlite_fts5_selection.md`](docs/sqlite_fts5_selection.md).
+
 Run the first free, local sentence-transformer baseline on development topics:
 
 ```bash
@@ -219,6 +229,8 @@ make run-trec-2021-dense-biomedical
 make compare-trec-2021-dense-ablation
 make compare-trec-2021-lexical-dense
 make run-trec-2021-hybrid
+make run-trec-2021-hybrid-sqlite
+make compare-trec-2021-hybrid-backends
 make compare-trec-2021-retrievers
 
 cat outputs/trec_2021_development_dense_ablation_comparison.md
@@ -305,31 +317,32 @@ curl -X POST http://localhost:8000/search \
   -d '{"query":"adult persistent asthma inhaled corticosteroid","top_k":5}'
 ```
 
-The request accepts `fielded-bm25`, `bm25`, `dense`, or `hybrid` as its `retriever`. Dense and
+The request accepts `sqlite-fts5`, `fielded-bm25`, `bm25`, `dense`, or `hybrid` as its
+`retriever`; SQLite FTS5 is the default. Dense and
 hybrid are advertised by `/metrics/health` only when a configured dense index exists. Search
 responses report `lexical`, `embedding`, `fusion`, and `total` latency separately, alongside
 corpus/index loading and combined retrieval timing. Every HTTP response also includes an
 `X-Process-Time-Ms` header, and the API writes structured JSON logs for search events.
 
-Set `BM25_INDEX_PATH` when running the API to reuse a persisted BM25 index:
+Set `SQLITE_FTS_INDEX_PATH` when running the API to reuse the selected disk-backed index:
 
 ```bash
 TRIAL_CORPUS_PATH=data/processed/clinicaltrials/asthma_recruiting_25.jsonl \
-BM25_INDEX_PATH=data/indexes/asthma_recruiting_25_serving_fielded_bm25.pkl \
+SQLITE_FTS_INDEX_PATH=data/indexes/asthma_recruiting_25_sqlite_fts5.sqlite \
 make api
 ```
 
 Search responses include `latency_ms.index_load`; after the first request this should usually
-drop near zero because the API also keeps the loaded retriever in memory. The serving fielded
-profile uses the frozen `fielded_bm25_condition_title_v1` weights. Rebuild older default-weight
-indexes before using them with this API configuration. Using a new index path, as above, lets the
-startup loader build and persist the compatible lexical index automatically.
+drop near zero because the API caches the validated retriever. Using a new index path lets startup
+build and persist a compatible SQLite index automatically. Legacy fielded and plain BM25 remain
+explicit comparison modes but are not preloaded because their expanded Python postings consume
+substantially more memory.
 
 Serve the selected dense and hybrid profiles over the local TREC corpus:
 
 ```bash
 TRIAL_CORPUS_PATH=data/processed/clinicaltrials/trec_2021_qrels_trials.jsonl \
-BM25_INDEX_PATH=data/indexes/trec_2021_fielded_bm25_condition_title_v1.pkl \
+SQLITE_FTS_INDEX_PATH=data/indexes/trec_2021_sqlite_fts5_condition_title_v1.sqlite \
 DENSE_INDEX_PATH=data/indexes/trec_2021_dense_all_minilm_l6_v2_title_summary_conditions.npz \
 make api
 ```
@@ -345,7 +358,7 @@ curl -X POST http://localhost:8000/search \
   -d '{"query":"adult persistent asthma","top_k":10,"retriever":"hybrid"}'
 ```
 
-Hybrid results include `component_ranks` for the fielded lexical and dense rankings. Model files,
+Hybrid results include `component_ranks` for the SQLite FTS5 and dense rankings. Model files,
 NumPy indexes, and generated search outputs remain local ignored artifacts.
 
 Fetch a full normalized trial record:
@@ -399,7 +412,7 @@ and equal-weight RRF settings. The command writes the ignored report to
 The report includes:
 
 - API import and corpus/index/model preload time for the fresh benchmark process
-- Per-phase retained and peak RSS deltas for corpus, fielded BM25, and dense resources
+- Per-phase retained and peak RSS deltas for corpus, SQLite FTS5, and dense resources
 - The startup resource phase responsible for the largest positive retained RSS increase
 - Warm handler latency with minimum, mean, p50, p95, and maximum values
 - Lexical, embedding, fusion, and total stage latency for each retriever
