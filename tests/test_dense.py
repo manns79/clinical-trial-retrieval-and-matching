@@ -29,6 +29,10 @@ except ImportError:
 class FakeEncoder:
     def __init__(self) -> None:
         self.calls: list[tuple[list[str], int, bool]] = []
+        self.quantized = False
+
+    def quantize_dynamic_int8(self) -> None:
+        self.quantized = True
 
     def encode(
         self,
@@ -158,6 +162,23 @@ class DenseRetrieverTest(unittest.TestCase):
         self.assertTrue(np.allclose(loaded.embeddings, index.embeddings))
         self.assertEqual(loaded.metadata["embedding_dimension"], 3)
 
+    def test_memory_mapped_index_round_trips_without_loading_embedding_values(self) -> None:
+        index = self._build_index()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "dense.mmap"
+            save_dense_index(path, index)
+            loaded = load_dense_index(
+                path,
+                self.trials,
+                model_name="fixture-model",
+                text_representation="title_summary_conditions",
+                max_seq_length=128,
+            )
+
+            self.assertIsInstance(loaded.embeddings, np.memmap)
+            self.assertTrue(np.allclose(loaded.embeddings, index.embeddings))
+            self.assertEqual(loaded.metadata["storage_format"], "npy_memmap")
+
     def test_persisted_index_rejects_model_or_corpus_drift(self) -> None:
         index = self._build_index()
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -222,6 +243,26 @@ class DenseRetrieverTest(unittest.TestCase):
         self.assertEqual(len(encoder.calls), 1)
         self.assertEqual(rows[0].nct_id, "NCT1")
         self.assertRegex(rows[0].to_trec_line(), r"^1 Q0 NCT1 1 [0-9.]+ dense_fixture$")
+
+    def test_dynamic_quantization_is_applied_after_corpus_index_build(self) -> None:
+        encoder = FakeEncoder()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            retriever = load_or_build_dense_retriever(
+                trials=self.trials,
+                model_name="fixture-model",
+                text_representation="title_summary_conditions",
+                batch_size=2,
+                device="cpu",
+                max_seq_length=128,
+                index_path=Path(tmpdir) / "dense.npz",
+                encoder_factory=lambda _model, _device, _length: encoder,
+                dynamic_quantization=True,
+                show_progress_bar=False,
+            )
+
+        self.assertTrue(encoder.quantized)
+        self.assertEqual(len(encoder.calls), 1)
+        self.assertIs(retriever.encoder, encoder)
 
     def test_dense_evaluation_writes_traceable_metrics_and_diagnostics(self) -> None:
         trials = [

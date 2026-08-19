@@ -40,6 +40,19 @@ class DenseExperimentTest(unittest.TestCase):
         self.assertIn("/development/", experiment.topics_path.as_posix())
         self.assertNotIn("/holdout/", experiment.topics_path.as_posix())
 
+    def test_mmap_int8_ablation_is_explicit_and_development_only(self) -> None:
+        experiment = load_dense_experiment(
+            Path(
+                "configs/experiments/trec_2021/"
+                "development_dense_all_minilm_l6_v2_mmap_int8.json"
+            )
+        )
+
+        self.assertTrue(experiment.dynamic_quantization)
+        self.assertEqual(experiment.index_path.suffix, ".mmap")
+        self.assertIn("/development/", experiment.topics_path.as_posix())
+        self.assertNotIn("/holdout/", experiment.topics_path.as_posix())
+
     def test_loader_rejects_unknown_text_representation(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             config_path = Path(tmpdir) / "dense.json"

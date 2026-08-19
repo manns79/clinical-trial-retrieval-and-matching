@@ -24,7 +24,11 @@ from clinical_trial_matching.retrieval.bm25 import (
     load_or_build_bm25_retriever,
     normalized_field_weights,
 )
-from clinical_trial_matching.retrieval.dense import load_or_build_dense_retriever
+from clinical_trial_matching.retrieval.dense import (
+    DenseRetriever,
+    SentenceTransformerEncoder,
+    load_dense_index,
+)
 from clinical_trial_matching.retrieval.hybrid import (
     RankedResults,
     reciprocal_rank_fuse_results,
@@ -72,6 +76,7 @@ class DenseServingConfig:
     batch_size: int
     device: str
     max_seq_length: int | None
+    dynamic_quantization: bool
 
 
 class SearchRequest(BaseModel):
@@ -291,6 +296,8 @@ def metrics_health() -> dict[str, object]:
             "sqlite_fts_retriever_loaded": load_sqlite_search_retriever.cache_info().currsize > 0,
             "dense_index_configured": dense_index_path is not None,
             "dense_index_exists": dense_index_exists,
+            "dense_index_loaded": load_dense_search_index.cache_info().currsize > 0,
+            "dense_encoder_loaded": load_dense_search_encoder.cache_info().currsize > 0,
             "dense_retriever_loaded": load_dense_search_retriever.cache_info().currsize > 0,
         },
         "available_retrievers": available_retrievers,
@@ -340,6 +347,7 @@ def get_dense_serving_config() -> DenseServingConfig:
             "DENSE_MAX_SEQ_LENGTH",
             DEFAULT_DENSE_MAX_SEQ_LENGTH,
         ),
+        dynamic_quantization=_boolean_env("DENSE_DYNAMIC_QUANTIZATION", False),
     )
 
 
@@ -389,7 +397,7 @@ def load_sqlite_search_retriever() -> Any:
 
 
 @lru_cache(maxsize=1)
-def load_dense_search_retriever() -> Any:
+def load_dense_search_index() -> Any:
     config = get_dense_serving_config()
     if not config.index_path.exists():
         raise HTTPException(
@@ -397,21 +405,48 @@ def load_dense_search_retriever() -> Any:
             detail=f"Dense index not found at {config.index_path}.",
         )
     try:
-        return load_or_build_dense_retriever(
-            trials=load_trial_corpus(),
+        return load_dense_index(
+            config.index_path,
+            load_trial_corpus(),
             model_name=config.model_name,
             text_representation=config.text_representation,
-            batch_size=config.batch_size,
-            device=config.device,
             max_seq_length=config.max_seq_length,
-            index_path=config.index_path,
-            show_progress_bar=False,
         )
-    except (RuntimeError, ValueError) as exc:
+    except (OSError, RuntimeError, ValueError) as exc:
         raise HTTPException(
             status_code=503,
-            detail=f"Dense retriever could not be loaded: {exc}",
+            detail=f"Dense index could not be loaded: {exc}",
         ) from exc
+
+
+@lru_cache(maxsize=1)
+def load_dense_search_encoder() -> Any:
+    config = get_dense_serving_config()
+    try:
+        encoder = SentenceTransformerEncoder(
+            config.model_name,
+            device=config.device,
+            max_seq_length=config.max_seq_length,
+        )
+        if config.dynamic_quantization:
+            encoder.quantize_dynamic_int8()
+        return encoder
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Dense encoder could not be loaded: {exc}",
+        ) from exc
+
+
+@lru_cache(maxsize=1)
+def load_dense_search_retriever() -> Any:
+    config = get_dense_serving_config()
+    return DenseRetriever(
+        load_trial_corpus(),
+        index=load_dense_search_index(),
+        encoder=load_dense_search_encoder(),
+        batch_size=config.batch_size,
+    )
 
 
 def preload_search_resources(
@@ -426,9 +461,15 @@ def preload_search_resources(
         on_phase_complete("sqlite_fts5")
     dense_configured = get_dense_index_path() is not None
     if dense_configured:
+        load_dense_search_index()
+        if on_phase_complete is not None:
+            on_phase_complete("dense_embedding_index")
+        load_dense_search_encoder()
+        if on_phase_complete is not None:
+            on_phase_complete("dense_encoder_model")
         load_dense_search_retriever()
         if on_phase_complete is not None:
-            on_phase_complete("dense_index_and_model")
+            on_phase_complete("dense_retriever_assembly")
     log_event(
         LOGGER,
         "search_resources_loaded",
@@ -473,6 +514,12 @@ def dense_parameters(retriever: Any, top_k: int) -> dict[str, Any]:
         "max_seq_length": metadata["max_seq_length"],
         "embedding_dimension": metadata["embedding_dimension"],
         "normalize_embeddings": metadata["normalize_embeddings"],
+        "index_storage_format": metadata.get("storage_format", "compressed_npz"),
+        "query_encoder_quantization": getattr(
+            getattr(retriever, "encoder", None),
+            "quantization",
+            "unknown",
+        ),
     }
 
 
@@ -518,6 +565,18 @@ def _optional_positive_env_int(name: str, default: int | None) -> int | None:
     if value < 1:
         raise ValueError(f"{name} must be at least 1")
     return value
+
+
+def _boolean_env(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    normalized = raw.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    raise ValueError(f"{name} must be a boolean value")
 
 
 def get_trial_by_nct_id(nct_id: str) -> Trial | None:

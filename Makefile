@@ -1,7 +1,7 @@
 PYTHON ?= python3
 PYTHONPATH ?= src
 
-.PHONY: install install-dev install-ui install-dense test compile ingest-sample ingest-ctgov-sample report-ctgov-sample search-ctgov-sample download-ctgov-small build-trec-corpus-smoke build-bm25-index-sample evaluate-baseline evaluate-trec-bm25-sample compare-metrics-sample split-trec-2021-topics run-trec-2021-bm25 run-trec-2021-fielded-bm25 run-trec-2021-fielded-bm25-candidate run-trec-2021-sqlite-fts5 compare-trec-2021-bm25 compare-trec-2021-lexical-backends evaluate-trec-2021-lexical-holdout run-trec-2021-dense run-trec-2021-dense-biomedical compare-trec-2021-dense-ablation compare-trec-2021-lexical-dense run-trec-2021-hybrid run-trec-2021-hybrid-sqlite compare-trec-2021-retrievers compare-trec-2021-hybrid-backends benchmark-trec-2021-serving benchmark-trec-2021-lexical-backends check-retrieval-regression ingest-trec-sample validate-trec-sample write-manifest-sample api ui docker-up docker-down docker-smoke clean
+.PHONY: install install-dev install-ui install-dense test compile ingest-sample ingest-ctgov-sample report-ctgov-sample search-ctgov-sample download-ctgov-small build-trec-corpus-smoke build-bm25-index-sample evaluate-baseline evaluate-trec-bm25-sample compare-metrics-sample split-trec-2021-topics run-trec-2021-bm25 run-trec-2021-fielded-bm25 run-trec-2021-fielded-bm25-candidate run-trec-2021-sqlite-fts5 compare-trec-2021-bm25 compare-trec-2021-lexical-backends evaluate-trec-2021-lexical-holdout run-trec-2021-dense run-trec-2021-dense-biomedical convert-trec-2021-dense-mmap run-trec-2021-dense-mmap-int8 compare-trec-2021-dense-optimization compare-trec-2021-dense-ablation compare-trec-2021-lexical-dense run-trec-2021-hybrid run-trec-2021-hybrid-sqlite compare-trec-2021-retrievers compare-trec-2021-hybrid-backends benchmark-trec-2021-serving benchmark-trec-2021-serving-mmap benchmark-trec-2021-serving-mmap-int8 assess-trec-2021-serving-budget benchmark-trec-2021-lexical-backends check-retrieval-regression ingest-trec-sample validate-trec-sample write-manifest-sample api ui docker-up docker-down docker-smoke clean
 
 install:
 	$(PYTHON) -m pip install -e .
@@ -148,6 +148,23 @@ run-trec-2021-dense:
 	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m clinical_trial_matching.cli run-dense-experiment \
 		--config configs/experiments/trec_2021/development_dense_all_minilm_l6_v2.json
 
+convert-trec-2021-dense-mmap:
+	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m clinical_trial_matching.cli convert-dense-index-mmap \
+		--config configs/experiments/trec_2021/development_dense_all_minilm_l6_v2.json \
+		--output data/indexes/trec_2021_dense_all_minilm_l6_v2_title_summary_conditions.mmap
+
+run-trec-2021-dense-mmap-int8:
+	PYTHONPATH=$(PYTHONPATH) HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 $(PYTHON) -m clinical_trial_matching.cli run-dense-experiment \
+		--config configs/experiments/trec_2021/development_dense_all_minilm_l6_v2_mmap_int8.json
+
+compare-trec-2021-dense-optimization:
+	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m clinical_trial_matching.cli compare-metrics \
+		--metrics fp32_npz=outputs/trec_2021_development_dense_all_minilm_l6_v2_metrics.json \
+		--metrics mmap_int8=outputs/trec_2021_development_dense_all_minilm_l6_v2_mmap_int8_metrics.json \
+		--output outputs/trec_2021_development_dense_optimization_comparison.md \
+		--view eligible_only \
+		--view excluded_or_eligible
+
 run-trec-2021-dense-biomedical:
 	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m clinical_trial_matching.cli run-dense-experiment \
 		--config configs/experiments/trec_2021/development_dense_medembed_small_eligibility_snapshot.json
@@ -196,6 +213,20 @@ compare-trec-2021-retrievers:
 benchmark-trec-2021-serving:
 	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m clinical_trial_matching.cli benchmark-serving \
 		--config configs/benchmarks/trec_2021_local_serving.json
+
+benchmark-trec-2021-serving-mmap-int8:
+	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m clinical_trial_matching.cli benchmark-serving \
+		--config configs/benchmarks/trec_2021_local_serving_mmap_int8.json
+
+benchmark-trec-2021-serving-mmap:
+	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m clinical_trial_matching.cli benchmark-serving \
+		--config configs/benchmarks/trec_2021_local_serving_mmap.json
+
+assess-trec-2021-serving-budget:
+	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m clinical_trial_matching.cli assess-serving-budget \
+		--report outputs/trec_2021_local_serving_mmap_int8_benchmark.json \
+		--budget configs/benchmarks/deployment_budget_1gib.json \
+		--output outputs/trec_2021_local_serving_mmap_int8_budget_assessment.json
 
 benchmark-trec-2021-lexical-backends:
 	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m clinical_trial_matching.cli benchmark-lexical-backend \

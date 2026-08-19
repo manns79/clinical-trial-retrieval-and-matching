@@ -9,6 +9,7 @@ from clinical_trial_matching.benchmarking.lexical import (
     write_lexical_backend_comparison,
 )
 from clinical_trial_matching.benchmarking.serving import (
+    assess_serving_budget,
     load_serving_benchmark,
     run_serving_benchmark,
 )
@@ -80,6 +81,7 @@ from clinical_trial_matching.retrieval.dense import (
     TEXT_REPRESENTATIONS,
     SentenceTransformerEncoder,
     build_dense_index,
+    load_dense_index,
     load_or_build_dense_retriever,
     save_dense_index,
 )
@@ -279,6 +281,13 @@ def main() -> None:
     dense_index.add_argument("--trials", type=Path, required=True)
     dense_index.add_argument("--output", type=Path, required=True)
 
+    dense_index_conversion = subparsers.add_parser(
+        "convert-dense-index-mmap",
+        help="Convert a configured NumPy dense index to a memory-mapped directory artifact.",
+    )
+    dense_index_conversion.add_argument("--config", type=Path, required=True)
+    dense_index_conversion.add_argument("--output", type=Path, required=True)
+
     dense_evaluation = subparsers.add_parser(
         "evaluate-trec-dense",
         help="Evaluate a sentence-transformer bi-encoder on normalized TREC benchmark files.",
@@ -294,6 +303,7 @@ def main() -> None:
     dense_evaluation.add_argument("--run-name", default="dense_bi_encoder")
     dense_evaluation.add_argument("--top-k", type=int, default=100)
     dense_evaluation.add_argument("--rebuild-index", action="store_true")
+    dense_evaluation.add_argument("--dynamic-quantization", action="store_true")
 
     dense_experiment = subparsers.add_parser(
         "run-dense-experiment",
@@ -336,6 +346,14 @@ def main() -> None:
         help="Measure local serving startup, latency, throughput, memory, and artifact sizes.",
     )
     serving_benchmark.add_argument("--config", type=Path, required=True)
+
+    serving_budget = subparsers.add_parser(
+        "assess-serving-budget",
+        help="Check a serving benchmark report against a versioned deployment budget.",
+    )
+    serving_budget.add_argument("--report", type=Path, required=True)
+    serving_budget.add_argument("--budget", type=Path, required=True)
+    serving_budget.add_argument("--output", type=Path, required=True)
 
     lexical_benchmark = subparsers.add_parser(
         "benchmark-lexical-backend",
@@ -514,6 +532,8 @@ def main() -> None:
             device=args.device,
             max_seq_length=args.max_seq_length,
         )
+    elif args.command == "convert-dense-index-mmap":
+        convert_dense_index_mmap(args.config, args.output)
     elif args.command == "evaluate-trec-dense":
         evaluate_trec_dense(
             trials_path=args.trials,
@@ -531,6 +551,7 @@ def main() -> None:
             device=args.device,
             max_seq_length=args.max_seq_length,
             rebuild_index=args.rebuild_index,
+            dynamic_quantization=args.dynamic_quantization,
         )
     elif args.command == "run-dense-experiment":
         run_dense_experiment(args.config, rebuild_index=args.rebuild_index)
@@ -545,6 +566,10 @@ def main() -> None:
         )
     elif args.command == "benchmark-serving":
         benchmark_serving(args.config)
+    elif args.command == "assess-serving-budget":
+        assessment = assess_serving_budget(args.report, args.budget)
+        write_json(args.output, assessment)
+        print(f"Wrote serving budget assessment to {args.output}")
     elif args.command == "benchmark-lexical-backend":
         benchmark_lexical_backend_command(
             serving_config_path=args.serving_config,
@@ -1129,7 +1154,8 @@ def evaluate_trec_dense(
     device: str,
     max_seq_length: int | None,
     rebuild_index: bool = False,
-    experiment_metadata: dict[str, str | int] | None = None,
+    dynamic_quantization: bool = False,
+    experiment_metadata: dict[str, str | int | bool] | None = None,
 ) -> None:
     trials = [trial_from_flat_record(row) for row in read_jsonl(trials_path)]
     topics = [topic_from_json_record(row) for row in read_jsonl(topics_path)]
@@ -1143,6 +1169,7 @@ def evaluate_trec_dense(
         max_seq_length=max_seq_length,
         index_path=index_path,
         rebuild_index=rebuild_index,
+        dynamic_quantization=dynamic_quantization,
     )
     rows = build_dense_trec_run(
         retriever=retriever,
@@ -1158,6 +1185,9 @@ def evaluate_trec_dense(
         "device": device,
         "max_seq_length": max_seq_length,
         "normalize_embeddings": True,
+        "query_encoder_quantization": (
+            "dynamic_int8" if dynamic_quantization else "fp32"
+        ),
         "embedding_dimension": retriever.index.metadata["embedding_dimension"],
         "index_schema_version": retriever.index.metadata["schema_version"],
         "corpus_fingerprint": retriever.index.metadata["corpus_fingerprint"],
@@ -1214,7 +1244,27 @@ def run_dense_experiment(config_path: Path, *, rebuild_index: bool = False) -> N
         device=experiment.device,
         max_seq_length=experiment.max_seq_length,
         rebuild_index=rebuild_index,
+        dynamic_quantization=experiment.dynamic_quantization,
         experiment_metadata=experiment.metadata(),
+    )
+
+
+def convert_dense_index_mmap(config_path: Path, output_path: Path) -> None:
+    experiment = load_dense_experiment(config_path)
+    if output_path.suffix.lower() != ".mmap":
+        raise ValueError("Memory-mapped dense index output must use the .mmap suffix")
+    trials = [trial_from_flat_record(row) for row in read_jsonl(experiment.trials_path)]
+    index = load_dense_index(
+        experiment.index_path,
+        trials,
+        model_name=experiment.model_name,
+        text_representation=experiment.text_representation,
+        max_seq_length=experiment.max_seq_length,
+    )
+    save_dense_index(output_path, index)
+    print(
+        f"Converted {index.metadata['trials']} dense embeddings to memory-mapped index "
+        f"at {output_path}"
     )
 
 

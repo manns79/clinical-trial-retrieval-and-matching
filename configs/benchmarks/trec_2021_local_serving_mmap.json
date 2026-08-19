@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
-  "name": "trec_2021_local_serving",
-  "description": "Local CPU serving benchmark for the selected lexical, dense, and hybrid retrieval profiles.",
+  "name": "trec_2021_local_serving_mmap",
+  "description": "Local CPU serving candidate isolating the memory-mapped dense index with the selected FP32 encoder.",
   "project_root": "../..",
   "serving": {
     "corpus": "data/processed/clinicaltrials/trec_2021_qrels_trials.jsonl",
     "sqlite_fts_index": "data/indexes/trec_2021_sqlite_fts5_condition_title_v1.sqlite",
-    "dense_index": "data/indexes/trec_2021_dense_all_minilm_l6_v2_title_summary_conditions.npz",
+    "dense_index": "data/indexes/trec_2021_dense_all_minilm_l6_v2_title_summary_conditions.mmap",
     "dense_model_name": "sentence-transformers/all-MiniLM-L6-v2",
     "dense_text_representation": "title_summary_conditions",
     "dense_batch_size": 64,
@@ -17,11 +17,7 @@
     "rrf_candidate_depth": 100
   },
   "benchmark": {
-    "modes": [
-      "sqlite-fts5",
-      "dense",
-      "hybrid"
-    ],
+    "modes": ["sqlite-fts5", "dense", "hybrid"],
     "queries": [
       "Adult with persistent asthma and wheezing seeking an inhaled corticosteroid study.",
       "Child with type 1 diabetes using insulin and interested in glucose monitoring research.",
@@ -35,6 +31,6 @@
     "snippet_chars": 240
   },
   "artifacts": {
-    "output": "outputs/trec_2021_local_serving_benchmark.json"
+    "output": "outputs/trec_2021_local_serving_mmap_benchmark.json"
   }
 }

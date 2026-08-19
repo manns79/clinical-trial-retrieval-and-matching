@@ -20,3 +20,19 @@ operating system filesystem cache.
 Configs and tracked summaries must contain only synthetic queries and aggregate measurements.
 Never add patient data, benchmark records, model files, indexes, secrets, or detailed search
 results. JSON reports remain under ignored `outputs/` paths.
+
+The optimized candidate is deliberately separate from the default serving profile. It uses a
+directory-backed NumPy memory map and dynamic int8 quantization for the query encoder:
+
+```bash
+make convert-trec-2021-dense-mmap
+make run-trec-2021-dense-mmap-int8
+make compare-trec-2021-dense-optimization
+make benchmark-trec-2021-serving-mmap-int8
+make assess-trec-2021-serving-budget
+```
+
+The budget is a local planning target for a single worker in a 1 GiB container. Its 900 MiB peak
+process limit intentionally reserves 124 MiB for container/runtime overhead. These commands are
+offline and use no paid service. The mmap index, model cache, benchmark records, and reports stay
+in ignored paths; only aggregate, non-patient summaries are suitable for version control.

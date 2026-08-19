@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "name": "single_worker_1gib",
+  "description": "Local planning budget for a single API worker in a 1 GiB container, retaining 124 MiB of memory headroom.",
+  "limits": {
+    "peak_process_rss_mib": 900,
+    "cold_start_seconds": 15,
+    "hybrid_p95_latency_ms": 250
+  }
+}

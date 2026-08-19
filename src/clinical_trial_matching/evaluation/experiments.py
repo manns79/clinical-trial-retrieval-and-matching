@@ -60,6 +60,7 @@ class DenseExperiment:
     batch_size: int
     device: str
     max_seq_length: int | None
+    dynamic_quantization: bool
     top_k: int
     trials_path: Path
     topics_path: Path
@@ -72,13 +73,14 @@ class DenseExperiment:
     config_label: str
     config_sha256: str
 
-    def metadata(self) -> dict[str, str | int]:
+    def metadata(self) -> dict[str, str | int | bool]:
         return {
             "name": self.name,
             "description": self.description,
             "schema_version": DENSE_EXPERIMENT_SCHEMA_VERSION,
             "config_path": self.config_label,
             "config_sha256": self.config_sha256,
+            "dynamic_quantization": self.dynamic_quantization,
         }
 
 
@@ -246,6 +248,7 @@ def load_dense_experiment(path: Path) -> DenseExperiment:
         "batch_size",
         "device",
         "max_seq_length",
+        "dynamic_quantization",
         "benchmark",
         "artifacts",
     }
@@ -299,8 +302,12 @@ def load_dense_experiment(path: Path) -> DenseExperiment:
         config_label = config_path.name
 
     index_path = _project_path(project_root, artifacts, "index", "artifacts")
-    if index_path.suffix.lower() != ".npz":
-        raise ValueError("artifacts.index must use the .npz suffix")
+    if index_path.suffix.lower() not in {".npz", ".mmap"}:
+        raise ValueError("artifacts.index must use the .npz or .mmap suffix")
+
+    dynamic_quantization = payload.get("dynamic_quantization", False)
+    if not isinstance(dynamic_quantization, bool):
+        raise ValueError("dynamic_quantization must be a boolean")
 
     return DenseExperiment(
         name=name,
@@ -310,6 +317,7 @@ def load_dense_experiment(path: Path) -> DenseExperiment:
         batch_size=batch_size,
         device=device,
         max_seq_length=max_seq_length,
+        dynamic_quantization=dynamic_quantization,
         top_k=top_k,
         trials_path=_project_path(project_root, benchmark, "trials", "benchmark"),
         topics_path=_project_path(project_root, benchmark, "topics", "benchmark"),

@@ -18,9 +18,16 @@ from typing import Any, Literal, Protocol, cast
 from clinical_trial_matching.io import write_json
 
 SERVING_BENCHMARK_SCHEMA_VERSION = 1
+DEPLOYMENT_BUDGET_SCHEMA_VERSION = 1
 PRIMARY_MODES = ("sqlite-fts5", "dense", "hybrid")
 STAGE_NAMES = ("lexical", "embedding", "fusion", "total")
-STARTUP_RESOURCE_PHASES = ("corpus", "sqlite_fts5", "dense_index_and_model")
+STARTUP_RESOURCE_PHASES = (
+    "corpus",
+    "sqlite_fts5",
+    "dense_embedding_index",
+    "dense_encoder_model",
+    "dense_retriever_assembly",
+)
 
 
 @dataclass(frozen=True)
@@ -36,6 +43,7 @@ class ServingBenchmark:
     dense_batch_size: int
     dense_device: str
     dense_max_seq_length: int | None
+    dense_dynamic_quantization: bool
     rrf_k: int
     rrf_candidate_depth: int
     modes: tuple[str, ...]
@@ -61,6 +69,7 @@ class ServingBenchmark:
             "DENSE_MAX_SEQ_LENGTH": (
                 "" if self.dense_max_seq_length is None else str(self.dense_max_seq_length)
             ),
+            "DENSE_DYNAMIC_QUANTIZATION": str(self.dense_dynamic_quantization).lower(),
             "RRF_K": str(self.rrf_k),
             "RRF_CANDIDATE_DEPTH": str(self.rrf_candidate_depth),
             "HF_HUB_OFFLINE": "1",
@@ -187,6 +196,7 @@ def load_serving_benchmark(path: Path) -> ServingBenchmark:
             "dense_batch_size",
             "dense_device",
             "dense_max_seq_length",
+            "dense_dynamic_quantization",
             "rrf_k",
             "rrf_candidate_depth",
         },
@@ -254,6 +264,12 @@ def load_serving_benchmark(path: Path) -> ServingBenchmark:
         ),
         dense_device=_required_string(serving, "dense_device", "serving."),
         dense_max_seq_length=max_seq_length,
+        dense_dynamic_quantization=_optional_boolean(
+            serving,
+            "dense_dynamic_quantization",
+            default=False,
+            prefix="serving.",
+        ),
         rrf_k=_positive_integer(serving, "rrf_k", prefix="serving."),
         rrf_candidate_depth=_positive_integer(
             serving,
@@ -283,6 +299,52 @@ def load_serving_benchmark(path: Path) -> ServingBenchmark:
         config_label=config_label,
         config_sha256=hashlib.sha256(raw).hexdigest(),
     )
+
+
+def assess_serving_budget(report_path: Path, budget_path: Path) -> dict[str, Any]:
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    budget = json.loads(budget_path.read_text(encoding="utf-8"))
+    if not isinstance(report, dict) or not isinstance(budget, dict):
+        raise ValueError("Serving report and deployment budget must be JSON objects")
+    _reject_unknown_fields(
+        budget,
+        "budget",
+        {"schema_version", "name", "description", "limits"},
+    )
+    if budget.get("schema_version") != DEPLOYMENT_BUDGET_SCHEMA_VERSION:
+        raise ValueError("Unsupported deployment budget schema_version")
+    limits = _required_mapping(budget, "limits")
+    _reject_unknown_fields(
+        limits,
+        "limits",
+        {"peak_process_rss_mib", "cold_start_seconds", "hybrid_p95_latency_ms"},
+    )
+    observed = {
+        "peak_process_rss_mib": float(report["memory"]["peak"]["mib"]),
+        "cold_start_seconds": float(report["cold_start"]["seconds"]),
+        "hybrid_p95_latency_ms": float(
+            report["warm"]["modes"]["hybrid"]["handler_latency_ms"]["p95"]
+        ),
+    }
+    checks = {
+        name: {
+            "limit": float(limits[name]),
+            "observed": value,
+            "passed": value <= float(limits[name]),
+        }
+        for name, value in observed.items()
+    }
+    return {
+        "schema_version": DEPLOYMENT_BUDGET_SCHEMA_VERSION,
+        "budget": {
+            "name": _required_string(budget, "name"),
+            "description": _required_string(budget, "description"),
+            "path": str(budget_path),
+        },
+        "serving_report": str(report_path),
+        "passed": all(check["passed"] for check in checks.values()),
+        "checks": checks,
+    }
 
 
 def run_serving_benchmark(
@@ -401,6 +463,7 @@ def run_serving_benchmark(
             "snippet_chars": benchmark.snippet_chars,
             "dense_model_name": benchmark.dense_model_name,
             "dense_text_representation": benchmark.dense_text_representation,
+            "dense_dynamic_quantization": benchmark.dense_dynamic_quantization,
             "rrf_k": benchmark.rrf_k,
             "rrf_candidate_depth": benchmark.rrf_candidate_depth,
         },
@@ -590,7 +653,7 @@ def serving_artifact_sizes(benchmark: ServingBenchmark) -> dict[str, Any]:
             benchmark.sqlite_fts_index_path,
             benchmark.project_root,
         ),
-        "dense_index": _file_measure(benchmark.dense_index_path, benchmark.project_root),
+        "dense_index": _path_measure(benchmark.dense_index_path, benchmark.project_root),
     }
     model_cache_path = huggingface_model_cache_path(benchmark.dense_model_name)
     model_cache = _directory_measure(model_cache_path)
@@ -661,7 +724,7 @@ def _validate_artifacts_exist(benchmark: ServingBenchmark) -> None:
             benchmark.sqlite_fts_index_path,
             benchmark.dense_index_path,
         )
-        if not path.is_file()
+        if not path.exists()
     ]
     if missing:
         raise FileNotFoundError(
@@ -700,6 +763,17 @@ def _file_measure(path: Path, project_root: Path) -> dict[str, Any]:
     except ValueError:
         label = str(path)
     return {"path": label, **_byte_measure(path.stat().st_size)}
+
+
+def _path_measure(path: Path, project_root: Path) -> dict[str, Any]:
+    if path.is_file():
+        return _file_measure(path, project_root)
+    measured = _directory_measure(path)
+    try:
+        label = path.relative_to(project_root).as_posix()
+    except ValueError:
+        label = str(path)
+    return {**measured, "path": label}
 
 
 def _directory_measure(path: Path) -> dict[str, Any]:
@@ -742,6 +816,19 @@ def _required_string(payload: Mapping[str, Any], key: str, prefix: str = "") -> 
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"{prefix}{key} must be a non-empty string")
     return value.strip()
+
+
+def _optional_boolean(
+    payload: Mapping[str, Any],
+    key: str,
+    *,
+    default: bool,
+    prefix: str = "",
+) -> bool:
+    value = payload.get(key, default)
+    if not isinstance(value, bool):
+        raise ValueError(f"{prefix}{key} must be a boolean")
+    return value
 
 
 def _string_list(payload: Mapping[str, Any], key: str, prefix: str) -> list[str]:

@@ -14,6 +14,7 @@ from clinical_trial_matching.retrieval.bm25 import corpus_fingerprint
 
 DENSE_INDEX_SCHEMA_VERSION = "1.0"
 DENSE_RETRIEVER_NAME = "dense-bi-encoder"
+DENSE_INDEX_MMAP_SUFFIX = ".mmap"
 TEXT_REPRESENTATIONS = {
     "title": ("title",),
     "title_summary_conditions": ("title", "brief_summary", "conditions"),
@@ -73,6 +74,21 @@ class SentenceTransformerEncoder:
         self.model = sentence_transformers.SentenceTransformer(model_name, device=device)
         if max_seq_length is not None:
             self.model.max_seq_length = max_seq_length
+        self.quantization = "fp32"
+
+    def quantize_dynamic_int8(self) -> None:
+        torch = import_module("torch")
+        quantization = getattr(getattr(torch, "ao", None), "quantization", None)
+        quantize_dynamic = getattr(quantization, "quantize_dynamic", None)
+        if quantize_dynamic is None:
+            quantize_dynamic = torch.quantization.quantize_dynamic
+        self.model = quantize_dynamic(
+            self.model,
+            {torch.nn.Linear},
+            dtype=torch.qint8,
+            inplace=True,
+        )
+        self.quantization = "dynamic_int8"
 
     def encode(
         self,
@@ -99,7 +115,7 @@ class DenseRetriever:
         encoder: TextEncoder,
         batch_size: int,
     ) -> None:
-        self.trials = list(trials)
+        self.trials = trials if isinstance(trials, tuple) else tuple(trials)
         self.index = index
         self.encoder = encoder
         self.batch_size = batch_size
@@ -200,8 +216,11 @@ def build_dense_index(
 
 
 def save_dense_index(path: Path, index: DenseIndex) -> None:
+    if path.suffix.lower() == DENSE_INDEX_MMAP_SUFFIX:
+        _save_mmap_dense_index(path, index)
+        return
     if path.suffix.lower() != ".npz":
-        raise ValueError("Dense index output must use the .npz suffix")
+        raise ValueError("Dense index output must use the .npz or .mmap suffix")
     np = _numpy()
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary_path: Path | None = None
@@ -234,6 +253,14 @@ def load_dense_index(
     text_representation: str,
     max_seq_length: int | None,
 ) -> DenseIndex:
+    if path.suffix.lower() == DENSE_INDEX_MMAP_SUFFIX:
+        return _load_mmap_dense_index(
+            path,
+            trials,
+            model_name=model_name,
+            text_representation=text_representation,
+            max_seq_length=max_seq_length,
+        )
     np = _numpy()
     trial_list = list(trials)
     with np.load(path, allow_pickle=False) as payload:
@@ -256,6 +283,7 @@ def load_dense_index(
         model_name=model_name,
         text_representation=text_representation,
         max_seq_length=max_seq_length,
+        validate_embedding_values=True,
     )
     return DenseIndex(embeddings=embeddings, nct_ids=nct_ids, metadata=metadata)
 
@@ -271,6 +299,7 @@ def load_or_build_dense_retriever(
     index_path: Path,
     rebuild_index: bool = False,
     encoder_factory: Callable[[str, str, int | None], TextEncoder] | None = None,
+    dynamic_quantization: bool = False,
     show_progress_bar: bool = True,
 ) -> DenseRetriever:
     trial_list = list(trials)
@@ -304,6 +333,12 @@ def load_or_build_dense_retriever(
             show_progress_bar=show_progress_bar,
         )
         save_dense_index(index_path, index)
+
+    if dynamic_quantization:
+        quantize = getattr(encoder, "quantize_dynamic_int8", None)
+        if quantize is None:
+            raise ValueError("Configured dense encoder does not support dynamic int8 quantization")
+        quantize()
 
     return DenseRetriever(
         trial_list,
@@ -372,6 +407,7 @@ def _validate_loaded_index(
     model_name: str,
     text_representation: str,
     max_seq_length: int | None,
+    validate_embedding_values: bool,
 ) -> None:
     expected = {
         "schema_version": DENSE_INDEX_SCHEMA_VERSION,
@@ -396,11 +432,93 @@ def _validate_loaded_index(
         raise ValueError("Dense index embedding shape does not match the trial corpus")
     if int(metadata.get("embedding_dimension", 0)) != embeddings.shape[1]:
         raise ValueError("Dense index embedding dimension metadata is inconsistent")
-    if not _numpy().isfinite(embeddings).all():
-        raise ValueError("Dense index contains non-finite embeddings")
-    norms = _numpy().linalg.norm(embeddings, axis=1)
-    if not all(math.isclose(float(norm), 1.0, rel_tol=1e-5, abs_tol=1e-5) for norm in norms):
-        raise ValueError("Dense index embeddings are not normalized")
+    if validate_embedding_values:
+        if not _numpy().isfinite(embeddings).all():
+            raise ValueError("Dense index contains non-finite embeddings")
+        norms = _numpy().linalg.norm(embeddings, axis=1)
+        if not all(
+            math.isclose(float(norm), 1.0, rel_tol=1e-5, abs_tol=1e-5)
+            for norm in norms
+        ):
+            raise ValueError("Dense index embeddings are not normalized")
+
+
+def _save_mmap_dense_index(path: Path, index: DenseIndex) -> None:
+    np = _numpy()
+    path.mkdir(parents=True, exist_ok=True)
+    embeddings_path = path / "embeddings.npy"
+    with tempfile.NamedTemporaryFile(
+        mode="wb",
+        dir=path,
+        prefix=".embeddings.",
+        suffix=".tmp",
+        delete=False,
+    ) as handle:
+        temporary_embeddings = Path(handle.name)
+        np.save(handle, np.asarray(index.embeddings, dtype=np.float32), allow_pickle=False)
+    temporary_embeddings.replace(embeddings_path)
+    metadata = {**index.metadata, "storage_format": "npy_memmap"}
+    _atomic_write_text(path / "nct_ids.json", json.dumps(index.nct_ids))
+    _atomic_write_text(path / "metadata.json", json.dumps(metadata, sort_keys=True))
+
+
+def _load_mmap_dense_index(
+    path: Path,
+    trials: Iterable[Trial],
+    *,
+    model_name: str,
+    text_representation: str,
+    max_seq_length: int | None,
+) -> DenseIndex:
+    np = _numpy()
+    trial_list = list(trials)
+    required = (path / "embeddings.npy", path / "nct_ids.json", path / "metadata.json")
+    missing = [candidate.name for candidate in required if not candidate.is_file()]
+    if missing:
+        raise ValueError(f"Memory-mapped dense index is missing files: {', '.join(missing)}")
+    embeddings = np.load(path / "embeddings.npy", mmap_mode="r", allow_pickle=False)
+    if embeddings.dtype != np.float32:
+        raise ValueError("Memory-mapped dense embeddings must use float32")
+    nct_ids_value = json.loads((path / "nct_ids.json").read_text(encoding="utf-8"))
+    metadata = json.loads((path / "metadata.json").read_text(encoding="utf-8"))
+    if not isinstance(nct_ids_value, list) or not all(
+        isinstance(value, str) for value in nct_ids_value
+    ):
+        raise ValueError("Memory-mapped dense index NCT IDs must be a JSON string list")
+    if not isinstance(metadata, dict):
+        raise ValueError("Memory-mapped dense index metadata must be a JSON object")
+    nct_ids = tuple(nct_ids_value)
+    _validate_loaded_index(
+        embeddings=embeddings,
+        nct_ids=nct_ids,
+        metadata=metadata,
+        trials=trial_list,
+        model_name=model_name,
+        text_representation=text_representation,
+        max_seq_length=max_seq_length,
+        validate_embedding_values=False,
+    )
+    return DenseIndex(embeddings=embeddings, nct_ids=nct_ids, metadata=metadata)
+
+
+def _atomic_write_text(path: Path, value: str) -> None:
+    temporary_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as handle:
+            temporary_path = Path(handle.name)
+            handle.write(value)
+            handle.write("\n")
+        temporary_path.replace(path)
+    finally:
+        if temporary_path is not None and temporary_path.exists():
+            temporary_path.unlink()
 
 
 def _validate_dense_parameters(

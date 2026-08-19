@@ -7,6 +7,7 @@ from typing import Any
 
 from clinical_trial_matching.benchmarking.serving import (
     PRIMARY_MODES,
+    assess_serving_budget,
     dominant_startup_resource_phase,
     latency_summary,
     load_serving_benchmark,
@@ -25,7 +26,13 @@ class FakeServingRuntime:
 
     def preload(self, on_phase_complete: Any = None) -> None:
         self.preload_calls += 1
-        for phase in ("corpus", "sqlite_fts5", "dense_index_and_model"):
+        for phase in (
+            "corpus",
+            "sqlite_fts5",
+            "dense_embedding_index",
+            "dense_encoder_model",
+            "dense_retriever_assembly",
+        ):
             if on_phase_complete is not None:
                 on_phase_complete(phase)
 
@@ -113,7 +120,14 @@ class ServingBenchmarkTest(unittest.TestCase):
         self.assertEqual(report["cost"]["hosted_service_cost_usd"], 0.0)
         self.assertEqual(
             [phase["name"] for phase in report["cold_start"]["phases"]],
-            ["api_import", "corpus", "sqlite_fts5", "dense_index_and_model"],
+            [
+                "api_import",
+                "corpus",
+                "sqlite_fts5",
+                "dense_embedding_index",
+                "dense_encoder_model",
+                "dense_retriever_assembly",
+            ],
         )
         self.assertEqual(persisted["benchmark"]["name"], "fixture_serving")
         self.assertEqual(persisted["artifacts"]["files"]["dense_index"]["bytes"], 5)
@@ -182,7 +196,7 @@ class ServingBenchmarkTest(unittest.TestCase):
             {"name": "corpus", "retained_rss_delta": {"bytes": 100}},
             {"name": "sqlite_fts5", "retained_rss_delta": {"bytes": 300}},
             {
-                "name": "dense_index_and_model",
+                "name": "dense_encoder_model",
                 "retained_rss_delta": {"bytes": 100},
             },
         ]
@@ -191,6 +205,39 @@ class ServingBenchmarkTest(unittest.TestCase):
 
         self.assertEqual(dominant["name"], "sqlite_fts5")
         self.assertEqual(dominant["share_of_positive_resource_delta"], 0.6)
+
+    def test_budget_assessment_reports_failed_limits(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            report_path = root / "report.json"
+            budget_path = root / "budget.json"
+            write_json(
+                report_path,
+                {
+                    "memory": {"peak": {"mib": 950}},
+                    "cold_start": {"seconds": 10},
+                    "warm": {"modes": {"hybrid": {"handler_latency_ms": {"p95": 50}}}},
+                },
+            )
+            write_json(
+                budget_path,
+                {
+                    "schema_version": 1,
+                    "name": "fixture",
+                    "description": "Fixture budget.",
+                    "limits": {
+                        "peak_process_rss_mib": 900,
+                        "cold_start_seconds": 15,
+                        "hybrid_p95_latency_ms": 250,
+                    },
+                },
+            )
+
+            assessment = assess_serving_budget(report_path, budget_path)
+
+        self.assertFalse(assessment["passed"])
+        self.assertFalse(assessment["checks"]["peak_process_rss_mib"]["passed"])
+        self.assertTrue(assessment["checks"]["cold_start_seconds"]["passed"])
 
 
 def serving_benchmark_payload() -> dict[str, Any]:

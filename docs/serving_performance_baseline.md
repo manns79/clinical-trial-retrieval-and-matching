@@ -97,3 +97,37 @@ These values came from different fresh-process runs and may reflect filesystem-c
 variance, but the memory result is large enough to be decisive. The dense index/model is now the
 dominant startup resource, retaining 814.586 MiB in the latest run. The detailed quality and
 isolated resource comparison is recorded in `docs/sqlite_fts5_selection.md`.
+
+## Dense startup attribution and optimization outcome
+
+On 2026-08-19, the SQLite serving profile was instrumented with separate checkpoints for the
+dense embedding index, sentence-transformer encoder, and retriever assembly. The baseline was
+then compared with a bit-for-bit-equivalent NumPy memory map and a development-only dynamic-int8
+query-encoder ablation. The local deployment planning budget is a 1 GiB single-worker container
+with a 900 MiB process peak, leaving 124 MiB for runtime and container overhead.
+
+| profile | index RSS delta MiB | encoder RSS delta MiB | startup RSS MiB | peak RSS MiB | hybrid p95 ms |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| compressed NPZ + FP32 | 47.332 | 766.102 | 1,059.688 | 1,117.668 | 223.999 |
+| memory map + FP32 | 7.555 | 769.219 | 1,022.949 | 1,119.324 | 216.671 |
+| memory map + dynamic int8 | 7.523 | 821.898 | 1,075.773 | 1,132.316 | 240.471 |
+
+The retriever assembly retained 0 MiB in all profiles after changing it to preserve the existing
+corpus tuple. The mmap conversion preserved NCT order and every float32 embedding exactly. It
+reduced pre-search index residency by about 39.8 MiB, but warm retrieval paged the matrix into
+memory, so it did not reduce process peak or meet the deployment budget. Artifact size increased
+from 35.636 MiB to 38.680 MiB because the mmap array is intentionally uncompressed.
+
+Dynamic int8 is rejected. Even with in-place conversion, this PyTorch/sentence-transformers stack
+retained about 52.7 MiB more encoder memory than FP32 and missed the 900 MiB process target.
+Development eligible-only Recall@100 also dropped from 0.349217 to 0.310034, while eligible
+nDCG@10 dropped from 0.327490 to 0.283981. It fails both the memory and retrieval-quality gates
+and is not enabled in the default serving config.
+
+Mmap remains an explicit reproducible candidate rather than the default. It improves idle startup
+residency but does not create cross-encoder headroom under the 900 MiB process target. Cold-start
+timings varied substantially with filesystem cache state, so the memory and quality findings are
+the decision evidence; timing differences are not treated as a reliable win.
+
+All detailed reports, trial records, indexes, model files, and diagnostics remain ignored. This
+tracked section contains aggregate measurements and synthetic-query latency only.

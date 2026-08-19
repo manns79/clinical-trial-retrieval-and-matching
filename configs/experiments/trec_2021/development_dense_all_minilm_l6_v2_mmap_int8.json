@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "name": "trec_2021_development_dense_all_minilm_l6_v2_mmap_int8",
+  "description": "Development-only dynamic-int8 query encoder ablation using the selected MiniLM corpus embeddings in memory-mapped form.",
+  "project_root": "../../..",
+  "model_name": "sentence-transformers/all-MiniLM-L6-v2",
+  "text_representation": "title_summary_conditions",
+  "batch_size": 64,
+  "device": "cpu",
+  "max_seq_length": 256,
+  "dynamic_quantization": true,
+  "benchmark": {
+    "trials": "data/processed/clinicaltrials/trec_2021_qrels_trials.jsonl",
+    "topics": "data/processed/trec/2021/splits/development/topics.jsonl",
+    "qrels": "data/processed/trec/2021/splits/development/qrels.jsonl",
+    "top_k": 100
+  },
+  "artifacts": {
+    "index": "data/indexes/trec_2021_dense_all_minilm_l6_v2_title_summary_conditions.mmap",
+    "run": "outputs/trec_2021_development_dense_all_minilm_l6_v2_mmap_int8.run",
+    "metrics": "outputs/trec_2021_development_dense_all_minilm_l6_v2_mmap_int8_metrics.json",
+    "diagnostics": "outputs/trec_2021_development_dense_all_minilm_l6_v2_mmap_int8_diagnostics.json"
+  }
+}
