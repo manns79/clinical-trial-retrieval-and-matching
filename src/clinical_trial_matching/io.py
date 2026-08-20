@@ -1,23 +1,28 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
 from pathlib import Path
 from typing import Any
 
 
-def read_jsonl(path: Path) -> list[dict[str, Any]]:
-    rows: list[dict[str, Any]] = []
+def iter_jsonl(path: Path) -> Iterator[dict[str, Any]]:
     with path.open("r", encoding="utf-8") as handle:
         for line_number, line in enumerate(handle, start=1):
             stripped = line.strip()
             if not stripped:
                 continue
             try:
-                rows.append(json.loads(stripped))
+                payload = json.loads(stripped)
             except json.JSONDecodeError as exc:
                 raise ValueError(f"Invalid JSON on {path}:{line_number}") from exc
-    return rows
+            if not isinstance(payload, dict):
+                raise ValueError(f"Expected a JSON object on {path}:{line_number}")
+            yield payload
+
+
+def read_jsonl(path: Path) -> list[dict[str, Any]]:
+    return list(iter_jsonl(path))
 
 
 def read_json(path: Path) -> Any:

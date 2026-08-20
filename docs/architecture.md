@@ -12,7 +12,8 @@ This keeps the portfolio artifact deployable without forcing paid database or mo
 ## Components
 
 - Ingestion: downloads or reads source records, records provenance, and normalizes trial fields.
-- Storage: Postgres for structured fields, full-text search, and eventually pgvector embeddings.
+- Storage: SQLite for disk-backed serving metadata and FTS5 retrieval; Postgres remains an
+  optional later deployment path for structured fields and vector search.
 - Retrieval: BM25 evaluation baseline, SQLite FTS5 serving, metadata filters, dense retrieval,
   hybrid fusion, and reranking.
 - Evaluation: TREC-style qrels, reproducible run files, and metrics such as Recall@100, nDCG, MRR, and Precision@k.
@@ -30,16 +31,18 @@ This keeps the portfolio artifact deployable without forcing paid database or mo
 `POST /search` supports SQLite FTS5, plain BM25, the frozen field-aware BM25 profile, the selected
 local dense bi-encoder, and equal-weight reciprocal-rank fusion. SQLite FTS5 is the default and
 the lexical component of hybrid retrieval; legacy Python BM25 remains available for comparison
-but is not preloaded. It reads normalized trial JSONL from `TRIAL_CORPUS_PATH`. Dense and hybrid
+but is not preloaded. Primary serving modes validate a SQLite metadata store configured through
+`TRIAL_STORE_PATH` against the normalized JSONL snapshot at `TRIAL_CORPUS_PATH`. Dense and hybrid
 modes require a compatible ignored NumPy index configured
 through `DENSE_INDEX_PATH`; the model and index are validated and loaded once in the FastAPI
 lifespan before requests are accepted. The service never builds corpus embeddings on a request.
 
 Search responses include stage latency for lexical retrieval, query embedding/dense scoring,
-fusion, and total handler time. Hybrid records retain each component rank alongside the fused
+fusion, on-demand metadata loading, and total handler time. Hybrid records retain each component rank alongside the fused
 score. `/metrics/health` advertises only retrievers supported by the currently mounted artifacts.
 
-`GET /trial/{nct_id}` returns the full normalized trial record from the same configured corpus. It is intended as the detail endpoint that search results can link to before the project moves to database-backed serving.
+`GET /trial/{nct_id}` loads one full normalized record from the SQLite metadata store. Search
+loads only the top result records in one bounded query for snippets and traceable fields.
 
 ## Streamlit UI
 
@@ -78,8 +81,8 @@ warmups, and interleaves SQLite FTS5, dense, and hybrid requests over synthetic 
 capture handler and stage p50/p95 latency, sequential throughput, RSS, artifact sizes, and system
 metadata under ignored `outputs/` paths.
 
-Startup profiling checkpoints the process after API import, normalized corpus loading, SQLite
-FTS5 loading, and combined dense index/model loading. Each checkpoint reports elapsed time,
+Startup profiling checkpoints the process after API import, trial-store validation, SQLite FTS5
+loading, dense index loading, encoder loading, and retriever assembly. Each checkpoint reports elapsed time,
 retained RSS change, and observed peak RSS change. These deltas describe one process on one host;
 they can be influenced by allocator behavior and operating-system filesystem caches.
 

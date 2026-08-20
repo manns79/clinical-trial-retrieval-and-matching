@@ -68,7 +68,7 @@ from clinical_trial_matching.ingestion.trec import (
     topic_to_json_record,
     validate_topics_and_qrels,
 )
-from clinical_trial_matching.io import read_jsonl, write_json, write_jsonl
+from clinical_trial_matching.io import iter_jsonl, read_jsonl, write_json, write_jsonl
 from clinical_trial_matching.models import Qrel
 from clinical_trial_matching.retrieval.bm25 import (
     BM25Retriever,
@@ -96,6 +96,7 @@ from clinical_trial_matching.retrieval.sqlite_fts import (
     build_sqlite_fts_index,
     load_or_build_sqlite_fts_retriever,
 )
+from clinical_trial_matching.trial_store import build_trial_store
 from clinical_trial_matching.validation.trials import summarize_trial_corpus
 
 
@@ -272,6 +273,13 @@ def main() -> None:
         default=[],
         help="Required field=weight values for the five FTS5 text fields.",
     )
+
+    trial_store = subparsers.add_parser(
+        "build-trial-store",
+        help="Stream normalized trial JSONL into a disk-backed SQLite metadata store.",
+    )
+    trial_store.add_argument("--trials", type=Path, required=True)
+    trial_store.add_argument("--output", type=Path, required=True)
 
     dense_index = subparsers.add_parser(
         "build-dense-index",
@@ -522,6 +530,8 @@ def main() -> None:
             output_path=args.output,
             field_weights=parse_field_weights(args.field_weight),
         )
+    elif args.command == "build-trial-store":
+        build_trial_store_command(args.trials, args.output)
     elif args.command == "build-dense-index":
         build_dense_index_command(
             trials_path=args.trials,
@@ -1101,6 +1111,18 @@ def build_sqlite_fts_index_command(
     )
     print(
         f"Wrote SQLite FTS5 index for {metadata['corpus']['trials']} trials "
+        f"to {output_path}"
+    )
+
+
+def build_trial_store_command(trials_path: Path, output_path: Path) -> None:
+    metadata = build_trial_store(
+        output_path,
+        (trial_from_flat_record(row) for row in iter_jsonl(trials_path)),
+        corpus_path=trials_path,
+    )
+    print(
+        f"Wrote SQLite trial metadata store for {metadata['corpus']['trials']} trials "
         f"to {output_path}"
     )
 

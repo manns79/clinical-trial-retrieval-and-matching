@@ -131,3 +131,34 @@ the decision evidence; timing differences are not treated as a reliable win.
 
 All detailed reports, trial records, indexes, model files, and diagnostics remain ignored. This
 tracked section contains aggregate measurements and synthetic-query latency only.
+
+## Disk-backed trial metadata outcome
+
+On 2026-08-20, primary serving modes stopped retaining the 26,150 normalized `Trial` objects.
+A streamed build now persists normalized records and corpus-integrity metadata in an ignored
+SQLite store. Startup validates the source-file checksum, corpus fingerprint, row count, and dense
+NCT ID order. Search batch-loads only returned records for snippets, while `/trial/{nct_id}` loads
+one record by primary key. Legacy Python BM25 remains available on demand and is the only serving
+mode that can still load the full JSONL corpus.
+
+Ranking parity was exact on all five synthetic serving queries for SQLite FTS5 top 100, dense top
+100, and hybrid top 10. The adopted FP32/NPZ profile produced these local measurements:
+
+| measurement | in-memory corpus | SQLite trial store |
+| --- | ---: | ---: |
+| corpus/store startup RSS delta MiB | 199.207 | 0.590 |
+| RSS after startup MiB | 1,059.688 | 910.074 |
+| warm process peak MiB | 1,117.668 | 968.148 |
+| cold start seconds | 27.581 | 7.581 |
+| hybrid handler p95 ms | 223.999 | 156.878 |
+
+Filesystem cache state and model allocator variance affect timing and encoder memory, so the
+startup-phase reduction and ranking parity are the strongest evidence. The 109.215 MiB store adds
+no hosted-service cost. On-demand metadata p95 was 7.461 ms for SQLite FTS5, 11.661 ms for dense,
+and 6.997 ms for hybrid in this run.
+
+The mmap/store combination lowered idle RSS after startup further to 871.293 MiB, but warm peak
+remained 967.660 MiB once retrieval paged the embedding matrix. It is therefore not adopted over
+the simpler compressed NPZ default. The selected profile passes the 15-second cold-start and
+250 ms hybrid-p95 targets but remains 68.148 MiB above the 900 MiB peak-process target. A
+cross-encoder is still deferred.

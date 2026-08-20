@@ -4,6 +4,12 @@ Each JSON file in this directory defines a reproducible local serving benchmark.
 corpus and persisted indexes, dense model configuration, RRF settings, synthetic queries, warmup
 and measurement counts, and an ignored output path.
 
+Build the disk-backed metadata store before running the TREC benchmark:
+
+```bash
+make build-trec-2021-trial-store
+```
+
 Run the TREC 2021 local benchmark:
 
 ```bash

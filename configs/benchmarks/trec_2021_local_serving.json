@@ -5,6 +5,7 @@
   "project_root": "../..",
   "serving": {
     "corpus": "data/processed/clinicaltrials/trec_2021_qrels_trials.jsonl",
+    "trial_store": "data/indexes/trec_2021_trial_metadata.sqlite",
     "sqlite_fts_index": "data/indexes/trec_2021_sqlite_fts5_condition_title_v1.sqlite",
     "dense_index": "data/indexes/trec_2021_dense_all_minilm_l6_v2_title_summary_conditions.npz",
     "dense_model_name": "sentence-transformers/all-MiniLM-L6-v2",

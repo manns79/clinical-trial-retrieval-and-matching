@@ -1,7 +1,7 @@
 PYTHON ?= python3
 PYTHONPATH ?= src
 
-.PHONY: install install-dev install-ui install-dense test compile ingest-sample ingest-ctgov-sample report-ctgov-sample search-ctgov-sample download-ctgov-small build-trec-corpus-smoke build-bm25-index-sample evaluate-baseline evaluate-trec-bm25-sample compare-metrics-sample split-trec-2021-topics run-trec-2021-bm25 run-trec-2021-fielded-bm25 run-trec-2021-fielded-bm25-candidate run-trec-2021-sqlite-fts5 compare-trec-2021-bm25 compare-trec-2021-lexical-backends evaluate-trec-2021-lexical-holdout run-trec-2021-dense run-trec-2021-dense-biomedical convert-trec-2021-dense-mmap run-trec-2021-dense-mmap-int8 compare-trec-2021-dense-optimization compare-trec-2021-dense-ablation compare-trec-2021-lexical-dense run-trec-2021-hybrid run-trec-2021-hybrid-sqlite compare-trec-2021-retrievers compare-trec-2021-hybrid-backends benchmark-trec-2021-serving benchmark-trec-2021-serving-mmap benchmark-trec-2021-serving-mmap-int8 assess-trec-2021-serving-budget benchmark-trec-2021-lexical-backends check-retrieval-regression ingest-trec-sample validate-trec-sample write-manifest-sample api ui docker-up docker-down docker-smoke clean
+.PHONY: install install-dev install-ui install-dense test compile ingest-sample ingest-ctgov-sample build-trial-store-sample build-trec-2021-trial-store report-ctgov-sample search-ctgov-sample download-ctgov-small build-trec-corpus-smoke build-bm25-index-sample evaluate-baseline evaluate-trec-bm25-sample compare-metrics-sample split-trec-2021-topics run-trec-2021-bm25 run-trec-2021-fielded-bm25 run-trec-2021-fielded-bm25-candidate run-trec-2021-sqlite-fts5 compare-trec-2021-bm25 compare-trec-2021-lexical-backends evaluate-trec-2021-lexical-holdout run-trec-2021-dense run-trec-2021-dense-biomedical convert-trec-2021-dense-mmap run-trec-2021-dense-mmap-int8 compare-trec-2021-dense-optimization compare-trec-2021-dense-ablation compare-trec-2021-lexical-dense run-trec-2021-hybrid run-trec-2021-hybrid-sqlite compare-trec-2021-retrievers compare-trec-2021-hybrid-backends benchmark-trec-2021-serving benchmark-trec-2021-serving-mmap benchmark-trec-2021-serving-mmap-int8 assess-trec-2021-serving-budget benchmark-trec-2021-lexical-backends check-retrieval-regression ingest-trec-sample validate-trec-sample write-manifest-sample api ui docker-up docker-down docker-smoke clean
 
 install:
 	$(PYTHON) -m pip install -e .
@@ -30,6 +30,16 @@ ingest-ctgov-sample:
 	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m clinical_trial_matching.cli ingest-ctgov-studies \
 		--input data/fixtures/ctgov_v2_studies.sample.json \
 		--output data/processed/clinicaltrials/studies.sample.jsonl
+
+build-trial-store-sample: ingest-ctgov-sample
+	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m clinical_trial_matching.cli build-trial-store \
+		--trials data/processed/clinicaltrials/studies.sample.jsonl \
+		--output data/indexes/studies_sample_trial_store.sqlite
+
+build-trec-2021-trial-store:
+	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m clinical_trial_matching.cli build-trial-store \
+		--trials data/processed/clinicaltrials/trec_2021_qrels_trials.jsonl \
+		--output data/indexes/trec_2021_trial_metadata.sqlite
 
 report-ctgov-sample:
 	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m clinical_trial_matching.cli report-trial-corpus \
@@ -224,9 +234,9 @@ benchmark-trec-2021-serving-mmap:
 
 assess-trec-2021-serving-budget:
 	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m clinical_trial_matching.cli assess-serving-budget \
-		--report outputs/trec_2021_local_serving_mmap_int8_benchmark.json \
+		--report outputs/trec_2021_local_serving_benchmark.json \
 		--budget configs/benchmarks/deployment_budget_1gib.json \
-		--output outputs/trec_2021_local_serving_mmap_int8_budget_assessment.json
+		--output outputs/trec_2021_local_serving_budget_assessment.json
 
 benchmark-trec-2021-lexical-backends:
 	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m clinical_trial_matching.cli benchmark-lexical-backend \

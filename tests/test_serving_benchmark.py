@@ -27,7 +27,7 @@ class FakeServingRuntime:
     def preload(self, on_phase_complete: Any = None) -> None:
         self.preload_calls += 1
         for phase in (
-            "corpus",
+            "trial_metadata_store",
             "sqlite_fts5",
             "dense_embedding_index",
             "dense_encoder_model",
@@ -46,9 +46,24 @@ class FakeServingRuntime:
     ) -> dict[str, Any]:
         self.search_calls.append((query, mode))
         stage_values = {
-            "sqlite-fts5": {"lexical": 1.0, "embedding": 0.0, "fusion": 0.0},
-            "dense": {"lexical": 0.0, "embedding": 2.0, "fusion": 0.0},
-            "hybrid": {"lexical": 1.0, "embedding": 2.0, "fusion": 0.5},
+            "sqlite-fts5": {
+                "lexical": 1.0,
+                "embedding": 0.0,
+                "fusion": 0.0,
+                "metadata": 0.2,
+            },
+            "dense": {
+                "lexical": 0.0,
+                "embedding": 2.0,
+                "fusion": 0.0,
+                "metadata": 0.2,
+            },
+            "hybrid": {
+                "lexical": 1.0,
+                "embedding": 2.0,
+                "fusion": 0.5,
+                "metadata": 0.2,
+            },
         }[mode]
         total = sum(stage_values.values())
         return {
@@ -95,6 +110,7 @@ class ServingBenchmarkTest(unittest.TestCase):
             root = Path(tmpdir)
             for name, content in (
                 ("trials.jsonl", "{}\n"),
+                ("trial_store.sqlite", "metadata"),
                 ("fts.sqlite", "lexical"),
                 ("dense.npz", "dense"),
             ):
@@ -122,7 +138,7 @@ class ServingBenchmarkTest(unittest.TestCase):
             [phase["name"] for phase in report["cold_start"]["phases"]],
             [
                 "api_import",
-                "corpus",
+                "trial_metadata_store",
                 "sqlite_fts5",
                 "dense_embedding_index",
                 "dense_encoder_model",
@@ -154,6 +170,7 @@ class ServingBenchmarkTest(unittest.TestCase):
                     "lexical": 8.0,
                     "embedding": 0.0,
                     "fusion": 0.0,
+                    "metadata": 0.2,
                     "total": 9.0,
                 },
                 "result_count": 3,
@@ -165,6 +182,7 @@ class ServingBenchmarkTest(unittest.TestCase):
                     "lexical": 18.0,
                     "embedding": 0.0,
                     "fusion": 0.0,
+                    "metadata": 0.2,
                     "total": 19.0,
                 },
                 "result_count": 3,
@@ -193,7 +211,7 @@ class ServingBenchmarkTest(unittest.TestCase):
     def test_dominant_resource_phase_excludes_api_import(self) -> None:
         phases = [
             {"name": "api_import", "retained_rss_delta": {"bytes": 500}},
-            {"name": "corpus", "retained_rss_delta": {"bytes": 100}},
+            {"name": "trial_metadata_store", "retained_rss_delta": {"bytes": 100}},
             {"name": "sqlite_fts5", "retained_rss_delta": {"bytes": 300}},
             {
                 "name": "dense_encoder_model",
@@ -248,6 +266,7 @@ def serving_benchmark_payload() -> dict[str, Any]:
         "project_root": ".",
         "serving": {
             "corpus": "trials.jsonl",
+            "trial_store": "trial_store.sqlite",
             "sqlite_fts_index": "fts.sqlite",
             "dense_index": "dense.npz",
             "dense_model_name": "fixture-model",

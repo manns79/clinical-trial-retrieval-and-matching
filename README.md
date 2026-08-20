@@ -327,7 +327,12 @@ corpus/index loading and combined retrieval timing. Every HTTP response also inc
 Set `SQLITE_FTS_INDEX_PATH` when running the API to reuse the selected disk-backed index:
 
 ```bash
+ctmatch build-trial-store \
+  --trials data/processed/clinicaltrials/asthma_recruiting_25.jsonl \
+  --output data/indexes/asthma_recruiting_25_trial_store.sqlite
+
 TRIAL_CORPUS_PATH=data/processed/clinicaltrials/asthma_recruiting_25.jsonl \
+TRIAL_STORE_PATH=data/indexes/asthma_recruiting_25_trial_store.sqlite \
 SQLITE_FTS_INDEX_PATH=data/indexes/asthma_recruiting_25_sqlite_fts5.sqlite \
 make api
 ```
@@ -342,13 +347,15 @@ Serve the selected dense and hybrid profiles over the local TREC corpus:
 
 ```bash
 TRIAL_CORPUS_PATH=data/processed/clinicaltrials/trec_2021_qrels_trials.jsonl \
+TRIAL_STORE_PATH=data/indexes/trec_2021_trial_metadata.sqlite \
 SQLITE_FTS_INDEX_PATH=data/indexes/trec_2021_sqlite_fts5_condition_title_v1.sqlite \
 DENSE_INDEX_PATH=data/indexes/trec_2021_dense_all_minilm_l6_v2_title_summary_conditions.npz \
 make api
 ```
 
-The API validates and loads the persisted dense index and sentence-transformer once during
-startup. It does not rebuild corpus embeddings while serving. The default dense model,
+The API validates the metadata store, persisted dense index, and sentence-transformer once during
+startup. Full records and snippets are loaded from SQLite only for returned results; `/trial`
+loads one record by NCT ID. It does not rebuild corpus embeddings while serving. The default dense model,
 representation, sequence length, and RRF settings match the selected development experiments and
 can be overridden through the variables in `.env.example`.
 
@@ -411,11 +418,11 @@ and equal-weight RRF settings. The command writes the ignored report to
 
 The report includes:
 
-- API import and corpus/index/model preload time for the fresh benchmark process
-- Per-phase retained and peak RSS deltas for corpus, SQLite FTS5, and dense resources
+- API import and metadata-store/index/model preload time for the fresh benchmark process
+- Per-phase retained and peak RSS deltas for the trial store, SQLite FTS5, and dense resources
 - The startup resource phase responsible for the largest positive retained RSS increase
 - Warm handler latency with minimum, mean, p50, p95, and maximum values
-- Lexical, embedding, fusion, and total stage latency for each retriever
+- Lexical, embedding, fusion, metadata, and total stage latency for each retriever
 - Per-mode and aggregate sequential requests per second
 - RSS before startup, after startup, after measurement, and process peak
 - Corpus, lexical index, dense index, and local model-cache sizes

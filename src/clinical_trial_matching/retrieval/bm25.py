@@ -635,24 +635,28 @@ def corpus_metadata(trials: list[Trial], *, corpus_path: Path | None = None) -> 
 def corpus_fingerprint(trials: list[Trial]) -> str:
     digest = hashlib.sha256()
     for trial in trials:
-        payload = {
-            "nct_id": trial.nct_id,
-            "title": trial.title,
-            "brief_summary": trial.brief_summary,
-            "status": trial.status,
-            "conditions": list(trial.conditions),
-            "interventions": list(trial.interventions),
-            "eligibility_criteria": trial.eligibility_criteria,
-            "sex": trial.sex,
-            "minimum_age": trial.minimum_age,
-            "maximum_age": trial.maximum_age,
-            "phases": list(trial.phases),
-            "study_type": trial.study_type,
-            "locations": list(trial.locations),
-        }
-        digest.update(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8"))
-        digest.update(b"\n")
+        update_corpus_fingerprint(digest, trial)
     return digest.hexdigest()
+
+
+def update_corpus_fingerprint(digest: Any, trial: Trial) -> None:
+    payload = {
+        "nct_id": trial.nct_id,
+        "title": trial.title,
+        "brief_summary": trial.brief_summary,
+        "status": trial.status,
+        "conditions": list(trial.conditions),
+        "interventions": list(trial.interventions),
+        "eligibility_criteria": trial.eligibility_criteria,
+        "sex": trial.sex,
+        "minimum_age": trial.minimum_age,
+        "maximum_age": trial.maximum_age,
+        "phases": list(trial.phases),
+        "study_type": trial.study_type,
+        "locations": list(trial.locations),
+    }
+    digest.update(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8"))
+    digest.update(b"\n")
 
 
 def file_sha256(path: Path) -> str:

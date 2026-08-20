@@ -6,6 +6,7 @@ services:
       DATABASE_URL: postgresql+psycopg://trials:trials@db:5432/trials
       DATA_DIR: /app/data
       TRIAL_CORPUS_PATH: ${TRIAL_CORPUS_PATH:-/app/data/processed/clinicaltrials/studies.sample.jsonl}
+      TRIAL_STORE_PATH: ${TRIAL_STORE_PATH:-/app/data/indexes/studies_sample_trial_store.sqlite}
       BM25_INDEX_PATH: ${BM25_INDEX_PATH:-/app/data/indexes/studies_sample_fielded_bm25.pkl}
       SQLITE_FTS_INDEX_PATH: ${SQLITE_FTS_INDEX_PATH:-/app/data/indexes/studies_sample_sqlite_fts5.sqlite}
       DENSE_INDEX_PATH: ${DENSE_INDEX_PATH:-}
@@ -37,6 +38,9 @@ services:
         --field-weight conditions=1.5
         --field-weight interventions=0.25
         --field-weight eligibility_criteria=0.5
+        && python -m clinical_trial_matching.cli build-trial-store
+        --trials /app/data/processed/clinicaltrials/studies.sample.jsonl
+        --output /app/data/indexes/studies_sample_trial_store.sqlite
         && uvicorn clinical_trial_matching.api.main:app --host 0.0.0.0 --port 8000
     depends_on:
       db:

@@ -109,17 +109,21 @@ class SentenceTransformerEncoder:
 class DenseRetriever:
     def __init__(
         self,
-        trials: Iterable[Trial],
+        trials: Iterable[Trial] | None,
         *,
         index: DenseIndex,
         encoder: TextEncoder,
         batch_size: int,
     ) -> None:
-        self.trials = trials if isinstance(trials, tuple) else tuple(trials)
+        self.trials = (
+            None
+            if trials is None
+            else trials if isinstance(trials, tuple) else tuple(trials)
+        )
         self.index = index
         self.encoder = encoder
         self.batch_size = batch_size
-        if len(self.trials) != len(self.index.nct_ids):
+        if self.trials is not None and len(self.trials) != len(self.index.nct_ids):
             raise ValueError("Dense index and trial corpus have different lengths")
 
     def search(self, query: str, *, top_k: int = 10) -> list[SearchResult]:
@@ -146,17 +150,21 @@ class DenseRetriever:
             )
 
         scores = query_embeddings @ self.index.embeddings.T
-        result_count = min(top_k, len(self.trials))
+        result_count = min(top_k, len(self.index.nct_ids))
         rankings: list[list[SearchResult]] = []
         for query_scores in scores:
             ranked_indexes = np.argsort(-query_scores, kind="stable")[:result_count]
             rankings.append(
                 [
                     SearchResult(
-                        nct_id=self.trials[int(index)].nct_id,
+                        nct_id=self.index.nct_ids[int(index)],
                         score=float(query_scores[int(index)]),
                         rank=rank,
-                        title=self.trials[int(index)].title,
+                        title=(
+                            ""
+                            if self.trials is None
+                            else self.trials[int(index)].title
+                        ),
                     )
                     for rank, index in enumerate(ranked_indexes, start=1)
                 ]
@@ -253,16 +261,52 @@ def load_dense_index(
     text_representation: str,
     max_seq_length: int | None,
 ) -> DenseIndex:
-    if path.suffix.lower() == DENSE_INDEX_MMAP_SUFFIX:
-        return _load_mmap_dense_index(
-            path,
-            trials,
-            model_name=model_name,
-            text_representation=text_representation,
-            max_seq_length=max_seq_length,
-        )
-    np = _numpy()
     trial_list = list(trials)
+    index = _read_dense_index(path)
+    _validate_loaded_index(
+        embeddings=index.embeddings,
+        nct_ids=index.nct_ids,
+        metadata=index.metadata,
+        expected_nct_ids=tuple(trial.nct_id for trial in trial_list),
+        expected_trials=len(trial_list),
+        expected_corpus_fingerprint=corpus_fingerprint(trial_list),
+        model_name=model_name,
+        text_representation=text_representation,
+        max_seq_length=max_seq_length,
+        validate_embedding_values=path.suffix.lower() != DENSE_INDEX_MMAP_SUFFIX,
+    )
+    return index
+
+
+def load_dense_index_for_corpus(
+    path: Path,
+    *,
+    trials_count: int,
+    corpus_fingerprint_value: str,
+    model_name: str,
+    text_representation: str,
+    max_seq_length: int | None,
+) -> DenseIndex:
+    index = _read_dense_index(path)
+    _validate_loaded_index(
+        embeddings=index.embeddings,
+        nct_ids=index.nct_ids,
+        metadata=index.metadata,
+        expected_nct_ids=None,
+        expected_trials=trials_count,
+        expected_corpus_fingerprint=corpus_fingerprint_value,
+        model_name=model_name,
+        text_representation=text_representation,
+        max_seq_length=max_seq_length,
+        validate_embedding_values=path.suffix.lower() != DENSE_INDEX_MMAP_SUFFIX,
+    )
+    return index
+
+
+def _read_dense_index(path: Path) -> DenseIndex:
+    if path.suffix.lower() == DENSE_INDEX_MMAP_SUFFIX:
+        return _read_mmap_dense_index(path)
+    np = _numpy()
     with np.load(path, allow_pickle=False) as payload:
         required_arrays = {"embeddings", "nct_ids", "metadata"}
         missing_arrays = required_arrays - set(payload.files)
@@ -275,16 +319,6 @@ def load_dense_index(
             raise ValueError("Dense index metadata must be a JSON object")
         metadata = metadata_value
 
-    _validate_loaded_index(
-        embeddings=embeddings,
-        nct_ids=nct_ids,
-        metadata=metadata,
-        trials=trial_list,
-        model_name=model_name,
-        text_representation=text_representation,
-        max_seq_length=max_seq_length,
-        validate_embedding_values=True,
-    )
     return DenseIndex(embeddings=embeddings, nct_ids=nct_ids, metadata=metadata)
 
 
@@ -403,7 +437,9 @@ def _validate_loaded_index(
     embeddings: Any,
     nct_ids: tuple[str, ...],
     metadata: dict[str, Any],
-    trials: list[Trial],
+    expected_nct_ids: tuple[str, ...] | None,
+    expected_trials: int,
+    expected_corpus_fingerprint: str,
     model_name: str,
     text_representation: str,
     max_seq_length: int | None,
@@ -415,7 +451,7 @@ def _validate_loaded_index(
         "model_name": model_name,
         "text_representation": text_representation,
         "max_seq_length": max_seq_length,
-        "corpus_fingerprint": corpus_fingerprint(trials),
+        "corpus_fingerprint": expected_corpus_fingerprint,
     }
     mismatches = [
         key for key, expected_value in expected.items() if metadata.get(key) != expected_value
@@ -425,10 +461,11 @@ def _validate_loaded_index(
             "Dense index is incompatible with the requested corpus/config: "
             + ", ".join(mismatches)
         )
-    expected_ids = tuple(trial.nct_id for trial in trials)
-    if nct_ids != expected_ids:
+    if expected_nct_ids is not None and nct_ids != expected_nct_ids:
         raise ValueError("Dense index NCT ID order does not match the trial corpus")
-    if embeddings.ndim != 2 or embeddings.shape[0] != len(trials):
+    if len(nct_ids) != expected_trials:
+        raise ValueError("Dense index NCT ID count does not match the trial corpus")
+    if embeddings.ndim != 2 or embeddings.shape[0] != expected_trials:
         raise ValueError("Dense index embedding shape does not match the trial corpus")
     if int(metadata.get("embedding_dimension", 0)) != embeddings.shape[1]:
         raise ValueError("Dense index embedding dimension metadata is inconsistent")
@@ -462,16 +499,8 @@ def _save_mmap_dense_index(path: Path, index: DenseIndex) -> None:
     _atomic_write_text(path / "metadata.json", json.dumps(metadata, sort_keys=True))
 
 
-def _load_mmap_dense_index(
-    path: Path,
-    trials: Iterable[Trial],
-    *,
-    model_name: str,
-    text_representation: str,
-    max_seq_length: int | None,
-) -> DenseIndex:
+def _read_mmap_dense_index(path: Path) -> DenseIndex:
     np = _numpy()
-    trial_list = list(trials)
     required = (path / "embeddings.npy", path / "nct_ids.json", path / "metadata.json")
     missing = [candidate.name for candidate in required if not candidate.is_file()]
     if missing:
@@ -487,18 +516,11 @@ def _load_mmap_dense_index(
         raise ValueError("Memory-mapped dense index NCT IDs must be a JSON string list")
     if not isinstance(metadata, dict):
         raise ValueError("Memory-mapped dense index metadata must be a JSON object")
-    nct_ids = tuple(nct_ids_value)
-    _validate_loaded_index(
+    return DenseIndex(
         embeddings=embeddings,
-        nct_ids=nct_ids,
+        nct_ids=tuple(nct_ids_value),
         metadata=metadata,
-        trials=trial_list,
-        model_name=model_name,
-        text_representation=text_representation,
-        max_seq_length=max_seq_length,
-        validate_embedding_values=False,
     )
-    return DenseIndex(embeddings=embeddings, nct_ids=nct_ids, metadata=metadata)
 
 
 def _atomic_write_text(path: Path, value: str) -> None:

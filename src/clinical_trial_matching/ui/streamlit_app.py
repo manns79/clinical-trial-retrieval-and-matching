@@ -194,12 +194,13 @@ def render_result(result: dict[str, Any]) -> None:
 
 
 def render_latency(latency: dict[str, Any]) -> None:
-    columns = st.columns(4)
+    columns = st.columns(5)
     values = (
         ("Total", latency.get("total", 0)),
         ("Lexical", latency.get("lexical", 0)),
         ("Embedding", latency.get("embedding", 0)),
         ("Fusion", latency.get("fusion", 0)),
+        ("Metadata", latency.get("metadata", 0)),
     )
     for column, (label, value) in zip(columns, values, strict=True):
         column.metric(label, f"{float(value):.1f} ms")

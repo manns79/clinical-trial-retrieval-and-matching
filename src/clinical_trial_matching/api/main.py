@@ -27,7 +27,7 @@ from clinical_trial_matching.retrieval.bm25 import (
 from clinical_trial_matching.retrieval.dense import (
     DenseRetriever,
     SentenceTransformerEncoder,
-    load_dense_index,
+    load_dense_index_for_corpus,
 )
 from clinical_trial_matching.retrieval.hybrid import (
     RankedResults,
@@ -35,8 +35,9 @@ from clinical_trial_matching.retrieval.hybrid import (
 )
 from clinical_trial_matching.retrieval.sqlite_fts import (
     DEFAULT_SQLITE_FTS_FIELD_WEIGHTS,
-    load_or_build_sqlite_fts_retriever,
+    load_sqlite_fts_retriever_for_corpus,
 )
+from clinical_trial_matching.trial_store import SQLiteTrialStore, load_trial_store
 
 try:
     from fastapi import FastAPI, HTTPException, Request, Response
@@ -45,6 +46,7 @@ except ImportError as exc:  # pragma: no cover - import-time developer guidance
 
 DEFAULT_TRIAL_CORPUS_PATH = "data/processed/clinicaltrials/studies.sample.jsonl"
 DEFAULT_SQLITE_FTS_INDEX_PATH = "data/indexes/studies_sample_sqlite_fts5.sqlite"
+DEFAULT_TRIAL_STORE_PATH = "data/indexes/studies_sample_trial_store.sqlite"
 DEFAULT_DENSE_MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
 DEFAULT_DENSE_TEXT_REPRESENTATION = "title_summary_conditions"
 DEFAULT_DENSE_BATCH_SIZE = 64
@@ -156,7 +158,7 @@ def health() -> dict[str, str]:
 def search(request: SearchRequest) -> SearchResponse:
     total_start_ms = now_ms()
     load_start_ms = now_ms()
-    trials = load_trial_corpus()
+    trial_store = load_trial_metadata_store()
     corpus_load_ms = elapsed_ms(load_start_ms)
     index_load_start_ms = now_ms()
     lexical_retriever = None
@@ -194,7 +196,7 @@ def search(request: SearchRequest) -> SearchResponse:
         assert dense_retriever is not None
         candidate_depth = min(
             max(request.top_k, get_rrf_candidate_depth()),
-            len(trials),
+            trial_store.count,
         )
         lexical_start_ms = now_ms()
         lexical_results = lexical_retriever.search(request.query, top_k=candidate_depth)
@@ -220,21 +222,25 @@ def search(request: SearchRequest) -> SearchResponse:
         }
         parameters = hybrid_parameters(dense_retriever, request.top_k, candidate_depth)
 
+    metadata_start_ms = now_ms()
+    result_trials = trial_store.get_many([result.nct_id for result in results])
+    formatted_results = format_search_results(
+        result_trials,
+        results,
+        query=request.query,
+        snippet_chars=request.snippet_chars,
+        result_metadata=result_metadata,
+    )
+    metadata_ms = elapsed_ms(metadata_start_ms)
     payload: dict[str, Any] = {
         "query": request.query,
         "retriever": request.retriever,
         "parameters": parameters,
         "corpus": {
-            "trials": len(trials),
-            "unique_nct_ids": len({trial.nct_id for trial in trials}),
+            "trials": trial_store.count,
+            "unique_nct_ids": trial_store.unique_nct_ids,
         },
-        "results": format_search_results(
-            trials,
-            results,
-            query=request.query,
-            snippet_chars=request.snippet_chars,
-            result_metadata=result_metadata,
-        ),
+        "results": formatted_results,
     }
     retrieval_ms = lexical_ms + embedding_ms + fusion_ms
     payload["latency_ms"] = {
@@ -243,6 +249,7 @@ def search(request: SearchRequest) -> SearchResponse:
         "lexical": lexical_ms,
         "embedding": embedding_ms,
         "fusion": fusion_ms,
+        "metadata": metadata_ms,
         "retrieval": retrieval_ms,
         "total": elapsed_ms(total_start_ms),
     }
@@ -260,6 +267,7 @@ def search(request: SearchRequest) -> SearchResponse:
                 "bm25" if request.retriever == "bm25" else "fielded-bm25"
             ),
             "sqlite_fts_index_path": str(get_sqlite_fts_index_path()),
+            "trial_store_path": str(get_trial_store_path()),
             "dense_index_path": str(get_dense_index_path() or ""),
         },
     )
@@ -277,20 +285,24 @@ def get_trial(nct_id: str) -> TrialResponse:
 @app.get("/metrics/health")
 def metrics_health() -> dict[str, object]:
     corpus_path = get_trial_corpus_path()
+    trial_store_path = get_trial_store_path()
     index_path = get_bm25_index_path()
     dense_index_path = get_dense_index_path()
     sqlite_fts_index_path = get_sqlite_fts_index_path()
     corpus_exists = corpus_path.exists()
+    trial_store_exists = trial_store_path.exists()
     sqlite_fts_index_exists = sqlite_fts_index_path.exists()
     dense_index_exists = dense_index_path is not None and dense_index_path.exists()
     available_retrievers = ["sqlite-fts5", "fielded-bm25", "bm25"]
-    if corpus_exists and dense_index_exists:
+    if corpus_exists and trial_store_exists and dense_index_exists:
         available_retrievers.extend(["dense", "hybrid"])
     return {
         "status": "ok",
         "checks": {
             "api": True,
             "trial_corpus_exists": corpus_exists,
+            "trial_store_exists": trial_store_exists,
+            "trial_store_loaded": load_trial_metadata_store.cache_info().currsize > 0,
             "bm25_index_exists": Path(index_path).exists() if index_path else False,
             "sqlite_fts_index_exists": sqlite_fts_index_exists,
             "sqlite_fts_retriever_loaded": load_sqlite_search_retriever.cache_info().currsize > 0,
@@ -302,6 +314,7 @@ def metrics_health() -> dict[str, object]:
         },
         "available_retrievers": available_retrievers,
         "trial_corpus_path": str(corpus_path),
+        "trial_store_path": str(trial_store_path),
         "bm25_index_path": index_path,
         "sqlite_fts_index_path": str(sqlite_fts_index_path),
         "dense_index_path": str(dense_index_path or ""),
@@ -320,6 +333,10 @@ def get_bm25_index_path(retriever_name: str = "fielded-bm25") -> str:
 
 def get_sqlite_fts_index_path() -> Path:
     return Path(os.getenv("SQLITE_FTS_INDEX_PATH", DEFAULT_SQLITE_FTS_INDEX_PATH))
+
+
+def get_trial_store_path() -> Path:
+    return Path(os.getenv("TRIAL_STORE_PATH", DEFAULT_TRIAL_STORE_PATH))
 
 
 def get_dense_index_path() -> Path | None:
@@ -365,6 +382,29 @@ def load_trial_corpus() -> tuple[Trial, ...]:
     return tuple(trial_from_flat_record(row) for row in read_jsonl(corpus_path))
 
 
+@lru_cache(maxsize=1)
+def load_trial_metadata_store() -> SQLiteTrialStore:
+    corpus_path = get_trial_corpus_path()
+    if not corpus_path.exists():
+        raise HTTPException(
+            status_code=503,
+            detail=f"Trial corpus not found at {corpus_path}. Set TRIAL_CORPUS_PATH.",
+        )
+    try:
+        return load_trial_store(
+            get_trial_store_path(),
+            corpus_path=corpus_path,
+        )
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                f"Trial metadata store could not be loaded: {exc}. "
+                "Run `ctmatch build-trial-store` for the configured corpus."
+            ),
+        ) from exc
+
+
 @lru_cache(maxsize=4)
 def load_search_retriever(retriever_name: str) -> Any:
     if retriever_name not in {"bm25", "fielded-bm25"}:
@@ -383,11 +423,10 @@ def load_search_retriever(retriever_name: str) -> Any:
 @lru_cache(maxsize=1)
 def load_sqlite_search_retriever() -> Any:
     try:
-        return load_or_build_sqlite_fts_retriever(
-            trials=load_trial_corpus(),
-            index_path=get_sqlite_fts_index_path(),
+        return load_sqlite_fts_retriever_for_corpus(
+            get_sqlite_fts_index_path(),
+            corpus=load_trial_metadata_store().corpus,
             field_weights=DEFAULT_SQLITE_FTS_FIELD_WEIGHTS,
-            corpus_path=get_trial_corpus_path(),
         )
     except (OSError, RuntimeError, ValueError) as exc:
         raise HTTPException(
@@ -405,13 +444,17 @@ def load_dense_search_index() -> Any:
             detail=f"Dense index not found at {config.index_path}.",
         )
     try:
-        return load_dense_index(
+        trial_store = load_trial_metadata_store()
+        index = load_dense_index_for_corpus(
             config.index_path,
-            load_trial_corpus(),
+            trials_count=trial_store.count,
+            corpus_fingerprint_value=str(trial_store.corpus["fingerprint"]),
             model_name=config.model_name,
             text_representation=config.text_representation,
             max_seq_length=config.max_seq_length,
         )
+        trial_store.validate_nct_id_order(index.nct_ids)
+        return index
     except (OSError, RuntimeError, ValueError) as exc:
         raise HTTPException(
             status_code=503,
@@ -442,7 +485,7 @@ def load_dense_search_encoder() -> Any:
 def load_dense_search_retriever() -> Any:
     config = get_dense_serving_config()
     return DenseRetriever(
-        load_trial_corpus(),
+        None,
         index=load_dense_search_index(),
         encoder=load_dense_search_encoder(),
         batch_size=config.batch_size,
@@ -453,9 +496,9 @@ def preload_search_resources(
     on_phase_complete: Callable[[str], None] | None = None,
 ) -> None:
     start_ms = now_ms()
-    trials = load_trial_corpus()
+    trial_store = load_trial_metadata_store()
     if on_phase_complete is not None:
-        on_phase_complete("corpus")
+        on_phase_complete("trial_metadata_store")
     load_sqlite_search_retriever()
     if on_phase_complete is not None:
         on_phase_complete("sqlite_fts5")
@@ -474,7 +517,7 @@ def preload_search_resources(
         LOGGER,
         "search_resources_loaded",
         fields={
-            "trials": len(trials),
+            "trials": trial_store.count,
             "dense_configured": dense_configured,
             "duration_ms": elapsed_ms(start_ms),
         },
@@ -580,8 +623,4 @@ def _boolean_env(name: str, default: bool) -> bool:
 
 
 def get_trial_by_nct_id(nct_id: str) -> Trial | None:
-    normalized_nct_id = nct_id.strip().upper()
-    for trial in load_trial_corpus():
-        if trial.nct_id.upper() == normalized_nct_id:
-            return trial
-    return None
+    return load_trial_metadata_store().get(nct_id)

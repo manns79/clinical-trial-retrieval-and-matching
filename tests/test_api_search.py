@@ -8,9 +8,14 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from clinical_trial_matching.ingestion.clinicaltrials import trial_to_flat_record
-from clinical_trial_matching.io import write_jsonl
+from clinical_trial_matching.ingestion.clinicaltrials import (
+    trial_from_flat_record,
+    trial_to_flat_record,
+)
+from clinical_trial_matching.io import read_jsonl, write_jsonl
 from clinical_trial_matching.models import SearchResult, Trial
+from clinical_trial_matching.retrieval.sqlite_fts import build_sqlite_fts_index
+from clinical_trial_matching.trial_store import build_trial_store
 
 HAS_FASTAPI = importlib.util.find_spec("fastapi") is not None
 
@@ -25,9 +30,11 @@ class ApiSearchTest(unittest.TestCase):
             load_search_retriever,
             load_sqlite_search_retriever,
             load_trial_corpus,
+            load_trial_metadata_store,
         )
 
         load_trial_corpus.cache_clear()
+        load_trial_metadata_store.cache_clear()
         load_search_retriever.cache_clear()
         load_sqlite_search_retriever.cache_clear()
         load_dense_search_index.cache_clear()
@@ -35,6 +42,7 @@ class ApiSearchTest(unittest.TestCase):
         load_dense_search_retriever.cache_clear()
         self.environment_names = (
             "TRIAL_CORPUS_PATH",
+            "TRIAL_STORE_PATH",
             "BM25_INDEX_PATH",
             "PLAIN_BM25_INDEX_PATH",
             "SQLITE_FTS_INDEX_PATH",
@@ -60,6 +68,7 @@ class ApiSearchTest(unittest.TestCase):
             load_search_retriever,
             load_sqlite_search_retriever,
             load_trial_corpus,
+            load_trial_metadata_store,
         )
 
         for name, previous_value in self.previous_environment.items():
@@ -68,6 +77,7 @@ class ApiSearchTest(unittest.TestCase):
             else:
                 os.environ[name] = previous_value
         load_trial_corpus.cache_clear()
+        load_trial_metadata_store.cache_clear()
         load_search_retriever.cache_clear()
         load_sqlite_search_retriever.cache_clear()
         load_dense_search_index.cache_clear()
@@ -108,7 +118,7 @@ class ApiSearchTest(unittest.TestCase):
                 ],
             )
             os.environ["TRIAL_CORPUS_PATH"] = str(corpus_path)
-            os.environ["SQLITE_FTS_INDEX_PATH"] = str(Path(tmpdir) / "trials.sqlite")
+            self._configure_trial_store(corpus_path, build_fts=True)
             load_trial_corpus.cache_clear()
             load_sqlite_search_retriever.cache_clear()
 
@@ -132,6 +142,7 @@ class ApiSearchTest(unittest.TestCase):
         self.assertGreaterEqual(payload["latency_ms"]["lexical"], 0)
         self.assertEqual(payload["latency_ms"]["embedding"], 0)
         self.assertEqual(payload["latency_ms"]["fusion"], 0)
+        self.assertGreaterEqual(payload["latency_ms"]["metadata"], 0)
         self.assertGreaterEqual(payload["latency_ms"]["retrieval"], 0)
         self.assertGreaterEqual(payload["latency_ms"]["total"], 0)
 
@@ -154,6 +165,7 @@ class ApiSearchTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             corpus_path = self._write_search_corpus(Path(tmpdir))
             os.environ["TRIAL_CORPUS_PATH"] = str(corpus_path)
+            self._configure_trial_store(corpus_path)
             load_trial_corpus.cache_clear()
             dense_retriever = FakeServingRetriever(
                 [SearchResult("NCT1", 0.91, 1, "Asthma inhaler study")]
@@ -180,6 +192,7 @@ class ApiSearchTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             corpus_path = self._write_search_corpus(Path(tmpdir))
             os.environ["TRIAL_CORPUS_PATH"] = str(corpus_path)
+            self._configure_trial_store(corpus_path)
             load_trial_corpus.cache_clear()
             lexical_retriever = FakeServingRetriever(
                 [
@@ -232,6 +245,7 @@ class ApiSearchTest(unittest.TestCase):
             index_path = root / "dense.npz"
             index_path.touch()
             os.environ["TRIAL_CORPUS_PATH"] = str(corpus_path)
+            self._configure_trial_store(corpus_path)
             os.environ["DENSE_INDEX_PATH"] = str(index_path)
             load_trial_corpus.cache_clear()
             load_dense_search_index.cache_clear()
@@ -241,7 +255,7 @@ class ApiSearchTest(unittest.TestCase):
             encoder = object()
             with (
                 patch(
-                    "clinical_trial_matching.api.main.load_dense_index",
+                    "clinical_trial_matching.api.main.load_dense_index_for_corpus",
                     return_value=index,
                 ) as index_loader,
                 patch(
@@ -292,8 +306,8 @@ class ApiSearchTest(unittest.TestCase):
         completed: list[str] = []
         with (
             patch(
-                "clinical_trial_matching.api.main.load_trial_corpus",
-                return_value=(Trial(nct_id="NCT1", title="Fixture"),),
+                "clinical_trial_matching.api.main.load_trial_metadata_store",
+                return_value=SimpleNamespace(count=1),
             ),
             patch("clinical_trial_matching.api.main.load_sqlite_search_retriever"),
             patch(
@@ -309,7 +323,7 @@ class ApiSearchTest(unittest.TestCase):
         self.assertEqual(
             completed,
             [
-                "corpus",
+                "trial_metadata_store",
                 "sqlite_fts5",
                 "dense_embedding_index",
                 "dense_encoder_model",
@@ -332,6 +346,7 @@ class ApiSearchTest(unittest.TestCase):
             index_path = root / "dense.npz"
             index_path.touch()
             os.environ["TRIAL_CORPUS_PATH"] = str(corpus_path)
+            self._configure_trial_store(corpus_path)
             os.environ["DENSE_INDEX_PATH"] = str(index_path)
             with_dense = metrics_health()
 
@@ -366,7 +381,7 @@ class ApiSearchTest(unittest.TestCase):
         self.assertGreaterEqual(process_time_ms, 0)
 
     def test_get_trial_returns_normalized_trial_details(self) -> None:
-        from clinical_trial_matching.api.main import get_trial, load_trial_corpus
+        from clinical_trial_matching.api.main import get_trial
 
         with tempfile.TemporaryDirectory() as tmpdir:
             corpus_path = Path(tmpdir) / "trials.jsonl"
@@ -394,7 +409,7 @@ class ApiSearchTest(unittest.TestCase):
                 ],
             )
             os.environ["TRIAL_CORPUS_PATH"] = str(corpus_path)
-            load_trial_corpus.cache_clear()
+            self._configure_trial_store(corpus_path)
 
             response = get_trial("nct1")
 
@@ -411,7 +426,7 @@ class ApiSearchTest(unittest.TestCase):
     def test_get_trial_returns_404_when_nct_id_is_missing(self) -> None:
         from fastapi import HTTPException
 
-        from clinical_trial_matching.api.main import get_trial, load_trial_corpus
+        from clinical_trial_matching.api.main import get_trial
 
         with tempfile.TemporaryDirectory() as tmpdir:
             corpus_path = Path(tmpdir) / "trials.jsonl"
@@ -427,13 +442,42 @@ class ApiSearchTest(unittest.TestCase):
                 ],
             )
             os.environ["TRIAL_CORPUS_PATH"] = str(corpus_path)
-            load_trial_corpus.cache_clear()
+            self._configure_trial_store(corpus_path)
 
             with self.assertRaises(HTTPException) as context:
                 get_trial("NCT404")
 
         self.assertEqual(context.exception.status_code, 404)
         self.assertIn("Trial not found", context.exception.detail)
+
+    def test_primary_search_and_trial_lookup_do_not_load_jsonl_corpus(self) -> None:
+        from clinical_trial_matching.api.main import (
+            SearchRequest,
+            get_trial,
+            load_trial_corpus,
+            search,
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            corpus_path = self._write_search_corpus(Path(tmpdir))
+            os.environ["TRIAL_CORPUS_PATH"] = str(corpus_path)
+            self._configure_trial_store(corpus_path)
+            load_trial_corpus.cache_clear()
+            dense_retriever = FakeServingRetriever(
+                [SearchResult("NCT1", 0.91, 1, "")]
+            )
+            with patch(
+                "clinical_trial_matching.api.main.load_dense_search_retriever",
+                return_value=dense_retriever,
+            ):
+                response = search(
+                    SearchRequest(query="adult asthma", top_k=1, retriever="dense")
+                )
+            trial = get_trial("NCT1")
+
+        self.assertEqual(response.results[0]["nct_id"], "NCT1")
+        self.assertEqual(trial.nct_id, "NCT1")
+        self.assertEqual(load_trial_corpus.cache_info().currsize, 0)
 
     def test_search_returns_503_when_configured_corpus_is_missing(self) -> None:
         from fastapi import HTTPException
@@ -448,6 +492,20 @@ class ApiSearchTest(unittest.TestCase):
 
         self.assertEqual(context.exception.status_code, 503)
         self.assertIn("Trial corpus not found", context.exception.detail)
+
+    @staticmethod
+    def _configure_trial_store(corpus_path: Path, *, build_fts: bool = False) -> None:
+        from clinical_trial_matching.api.main import load_trial_metadata_store
+
+        trials = [trial_from_flat_record(row) for row in read_jsonl(corpus_path)]
+        store_path = corpus_path.with_name("trial_store.sqlite")
+        build_trial_store(store_path, trials, corpus_path=corpus_path)
+        os.environ["TRIAL_STORE_PATH"] = str(store_path)
+        load_trial_metadata_store.cache_clear()
+        if build_fts:
+            fts_path = corpus_path.with_name("trials_fts.sqlite")
+            build_sqlite_fts_index(fts_path, trials, corpus_path=corpus_path)
+            os.environ["SQLITE_FTS_INDEX_PATH"] = str(fts_path)
 
     @staticmethod
     def _write_search_corpus(root: Path) -> Path:

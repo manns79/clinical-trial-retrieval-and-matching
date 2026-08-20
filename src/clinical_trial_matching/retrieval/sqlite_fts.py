@@ -129,6 +129,48 @@ def load_sqlite_fts_retriever(
     if not path.is_file():
         raise FileNotFoundError(f"SQLite FTS5 index not found: {path}")
     trial_list = list(trials)
+    metadata, indexed_trials = _read_index_metadata(path)
+    if not isinstance(metadata, dict):
+        raise ValueError("SQLite FTS5 index metadata must be a JSON object")
+    _validate_sqlite_fts_index(
+        metadata,
+        indexed_trials=indexed_trials,
+        trials=trial_list,
+        field_weights=field_weights,
+        corpus_path=corpus_path,
+    )
+    return SQLiteFtsRetriever(path, metadata)
+
+
+def load_sqlite_fts_retriever_for_corpus(
+    path: Path,
+    *,
+    corpus: Mapping[str, Any],
+    field_weights: Mapping[str, float] | None = None,
+) -> SQLiteFtsRetriever:
+    if not path.is_file():
+        raise FileNotFoundError(f"SQLite FTS5 index not found: {path}")
+    metadata, indexed_trials = _read_index_metadata(path)
+    if not isinstance(metadata, dict):
+        raise ValueError("SQLite FTS5 index metadata must be a JSON object")
+    if metadata.get("schema_version") != SQLITE_FTS_INDEX_SCHEMA_VERSION:
+        raise ValueError("SQLite FTS5 index schema version is not supported")
+    if metadata.get("retriever") != SQLITE_FTS_RETRIEVER_NAME:
+        raise ValueError("SQLite FTS5 index retriever metadata is invalid")
+    if normalize_sqlite_fts_field_weights(metadata.get("field_weights")) != (
+        normalize_sqlite_fts_field_weights(field_weights)
+    ):
+        raise ValueError("SQLite FTS5 index field weights do not match requested weights")
+    observed_corpus = metadata.get("corpus", {})
+    for key in ("trials", "unique_nct_ids", "fingerprint"):
+        if observed_corpus.get(key) != corpus.get(key):
+            raise ValueError(f"SQLite FTS5 index corpus {key} does not match trial store")
+    if indexed_trials != int(corpus.get("trials", -1)):
+        raise ValueError("SQLite FTS5 row count does not match trial store")
+    return SQLiteFtsRetriever(path, metadata)
+
+
+def _read_index_metadata(path: Path) -> tuple[Any, int]:
     with _read_only_connection(path) as connection:
         try:
             row = connection.execute("SELECT payload FROM index_metadata").fetchone()
@@ -140,16 +182,7 @@ def load_sqlite_fts_retriever(
             )
         except sqlite3.OperationalError as exc:
             raise RuntimeError("SQLite FTS5 index could not be read") from exc
-    if not isinstance(metadata, dict):
-        raise ValueError("SQLite FTS5 index metadata must be a JSON object")
-    _validate_sqlite_fts_index(
-        metadata,
-        indexed_trials=indexed_trials,
-        trials=trial_list,
-        field_weights=field_weights,
-        corpus_path=corpus_path,
-    )
-    return SQLiteFtsRetriever(path, metadata)
+    return metadata, indexed_trials
 
 
 def load_or_build_sqlite_fts_retriever(

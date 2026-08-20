@@ -20,9 +20,9 @@ from clinical_trial_matching.io import write_json
 SERVING_BENCHMARK_SCHEMA_VERSION = 1
 DEPLOYMENT_BUDGET_SCHEMA_VERSION = 1
 PRIMARY_MODES = ("sqlite-fts5", "dense", "hybrid")
-STAGE_NAMES = ("lexical", "embedding", "fusion", "total")
+STAGE_NAMES = ("lexical", "embedding", "fusion", "metadata", "total")
 STARTUP_RESOURCE_PHASES = (
-    "corpus",
+    "trial_metadata_store",
     "sqlite_fts5",
     "dense_embedding_index",
     "dense_encoder_model",
@@ -36,6 +36,7 @@ class ServingBenchmark:
     description: str
     project_root: Path
     corpus_path: Path
+    trial_store_path: Path
     sqlite_fts_index_path: Path
     dense_index_path: Path
     dense_model_name: str
@@ -60,6 +61,7 @@ class ServingBenchmark:
     def environment(self) -> dict[str, str]:
         return {
             "TRIAL_CORPUS_PATH": str(self.corpus_path),
+            "TRIAL_STORE_PATH": str(self.trial_store_path),
             "SQLITE_FTS_INDEX_PATH": str(self.sqlite_fts_index_path),
             "DENSE_INDEX_PATH": str(self.dense_index_path),
             "DENSE_MODEL_NAME": self.dense_model_name,
@@ -189,6 +191,7 @@ def load_serving_benchmark(path: Path) -> ServingBenchmark:
         "serving",
         {
             "corpus",
+            "trial_store",
             "sqlite_fts_index",
             "dense_index",
             "dense_model_name",
@@ -244,6 +247,7 @@ def load_serving_benchmark(path: Path) -> ServingBenchmark:
         description=description,
         project_root=project_root,
         corpus_path=_project_path(project_root, serving, "corpus", "serving"),
+        trial_store_path=_project_path(project_root, serving, "trial_store", "serving"),
         sqlite_fts_index_path=_project_path(
             project_root,
             serving,
@@ -439,7 +443,7 @@ def run_serving_benchmark(
         "generated_at": datetime.now(UTC).isoformat(),
         "measurement_scope": {
             "cold_start": (
-                "API module import plus corpus, lexical index, dense index, and model preload "
+                "API module import plus trial store, lexical index, dense index, and model preload "
                 "inside a fresh benchmark CLI process; excludes model download time and may "
                 "benefit from the operating system filesystem cache"
             ),
@@ -649,6 +653,7 @@ def memory_report(
 def serving_artifact_sizes(benchmark: ServingBenchmark) -> dict[str, Any]:
     files = {
         "corpus": _file_measure(benchmark.corpus_path, benchmark.project_root),
+        "trial_store": _file_measure(benchmark.trial_store_path, benchmark.project_root),
         "sqlite_fts_index": _file_measure(
             benchmark.sqlite_fts_index_path,
             benchmark.project_root,
@@ -721,6 +726,7 @@ def _validate_artifacts_exist(benchmark: ServingBenchmark) -> None:
         path
         for path in (
             benchmark.corpus_path,
+            benchmark.trial_store_path,
             benchmark.sqlite_fts_index_path,
             benchmark.dense_index_path,
         )
