@@ -20,3 +20,4 @@ outputs/
 dist/
 build/
 *.egg-info/
+*.ses

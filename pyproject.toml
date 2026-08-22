@@ -29,6 +29,17 @@ dense = [
   "sentence-transformers>=3.0",
   "numpy>=1.26",
 ]
+onnx = [
+  "numpy>=1.26",
+  "onnx>=1.17",
+  "onnxruntime>=1.20",
+  "tokenizers>=0.20",
+]
+onnx-runtime = [
+  "numpy>=1.26",
+  "onnxruntime>=1.20",
+  "tokenizers>=0.20",
+]
 ml = [
   "sentence-transformers>=3.0",
   "numpy>=1.26",

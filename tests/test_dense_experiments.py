@@ -53,6 +53,30 @@ class DenseExperimentTest(unittest.TestCase):
         self.assertIn("/development/", experiment.topics_path.as_posix())
         self.assertNotIn("/holdout/", experiment.topics_path.as_posix())
 
+    def test_onnx_ablation_pins_local_artifact_and_development_topics(self) -> None:
+        experiment = load_dense_experiment(
+            Path(
+                "configs/experiments/trec_2021/"
+                "development_dense_all_minilm_l6_v2_onnx.json"
+            )
+        )
+
+        self.assertEqual(experiment.encoder_backend, "onnxruntime")
+        self.assertIsNotNone(experiment.onnx_model_path)
+        self.assertIn("/data/models/onnx/", str(experiment.onnx_model_path))
+        self.assertIn("/development/", experiment.topics_path.as_posix())
+        self.assertNotIn("/holdout/", experiment.topics_path.as_posix())
+
+    def test_loader_requires_onnx_artifact_for_onnx_backend(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "dense.json"
+            payload = dense_experiment_payload()
+            payload["encoder_backend"] = "onnxruntime"
+            write_json(config_path, payload)
+
+            with self.assertRaisesRegex(ValueError, "onnx_model_path is required"):
+                load_dense_experiment(config_path)
+
     def test_loader_rejects_unknown_text_representation(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             config_path = Path(tmpdir) / "dense.json"

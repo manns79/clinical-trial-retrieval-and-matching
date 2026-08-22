@@ -346,18 +346,23 @@ substantially more memory.
 Serve the selected dense and hybrid profiles over the local TREC corpus:
 
 ```bash
+make install-onnx
+make export-trec-2021-onnx-encoder
+
 TRIAL_CORPUS_PATH=data/processed/clinicaltrials/trec_2021_qrels_trials.jsonl \
 TRIAL_STORE_PATH=data/indexes/trec_2021_trial_metadata.sqlite \
 SQLITE_FTS_INDEX_PATH=data/indexes/trec_2021_sqlite_fts5_condition_title_v1.sqlite \
 DENSE_INDEX_PATH=data/indexes/trec_2021_dense_all_minilm_l6_v2_title_summary_conditions.npz \
+DENSE_ENCODER_BACKEND=onnxruntime \
+DENSE_ONNX_MODEL_PATH=data/models/onnx/all-MiniLM-L6-v2 \
 make api
 ```
 
-The API validates the metadata store, persisted dense index, and sentence-transformer once during
-startup. Full records and snippets are loaded from SQLite only for returned results; `/trial`
-loads one record by NCT ID. It does not rebuild corpus embeddings while serving. The default dense model,
-representation, sequence length, and RRF settings match the selected development experiments and
-can be overridden through the variables in `.env.example`.
+The export command uses the locally cached sentence-transformer and writes an ignored ONNX model,
+tokenizer, and checksum metadata under `data/models/`. Serving then validates the metadata store,
+dense index, and ONNX artifact once during startup. It does not import PyTorch, rebuild corpus
+embeddings, or call a hosted service. Full records and snippets are loaded from SQLite only for
+returned results; `/trial` loads one record by NCT ID.
 
 ```bash
 curl -X POST http://localhost:8000/search \
@@ -412,13 +417,13 @@ make benchmark-trec-2021-serving
 ```
 
 The tracked spec at `configs/benchmarks/trec_2021_local_serving.json` pins five synthetic queries,
-one warmup round, five measurement rounds, `top_k=10`, the selected indexes and MiniLM profile,
-and equal-weight RRF settings. The command writes the ignored report to
+one warmup round, five measurement rounds, `top_k=10`, the selected indexes, the ONNX Runtime
+MiniLM query encoder, and equal-weight RRF settings. The command writes the ignored report to
 `outputs/trec_2021_local_serving_benchmark.json`.
 
 The report includes:
 
-- API import and metadata-store/index/model preload time for the fresh benchmark process
+- API import and metadata-store/index/framework/model/first-inference/thread-pool preload time
 - Per-phase retained and peak RSS deltas for the trial store, SQLite FTS5, and dense resources
 - The startup resource phase responsible for the largest positive retained RSS increase
 - Warm handler latency with minimum, mean, p50, p95, and maximum values
@@ -430,8 +435,8 @@ The report includes:
 
 Warm measurements call the FastAPI search handler in-process after deterministic warmup. They
 exclude HTTP transport and response serialization. Throughput is sequential single-process
-capacity, not a concurrent load-test claim. The model must already be cached because the benchmark
-forces offline mode; no hosted service or paid API is used.
+capacity, not a concurrent load-test claim. The exported ONNX artifact must already exist because
+the benchmark forces offline mode; no hosted service or paid API is used.
 
 ## Docker Compose Demo
 

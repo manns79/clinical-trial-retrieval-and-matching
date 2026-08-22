@@ -162,3 +162,37 @@ remained 967.660 MiB once retrieval paged the embedding matrix. It is therefore 
 the simpler compressed NPZ default. The selected profile passes the 15-second cold-start and
 250 ms hybrid-p95 targets but remains 68.148 MiB above the 900 MiB peak-process target. A
 cross-encoder is still deferred.
+
+## Encoder phase split and ONNX Runtime outcome
+
+On 2026-08-22, encoder startup was split into framework import, model/session construction, and
+first-inference/thread-pool initialization. A free local FP32 ONNX Runtime export of the selected
+MiniLM query encoder was
+then evaluated against the same persisted corpus embeddings. Dense scores are rounded to six
+decimals for ranking and exact ties resolve by NCT ID, making near-tie behavior independent of
+small backend floating-point differences.
+
+The ONNX development run matched the sentence-transformers run exactly for all 60 development
+topics through rank 100. Consequently, eligible-only and excluded-or-eligible metrics were also
+identical. No holdout topics were used.
+
+| measurement | sentence-transformers | ONNX Runtime |
+| --- | ---: | ---: |
+| framework import retained RSS MiB | 776.617 | 18.895 |
+| model/session retained RSS MiB | 32.625 | 126.031 |
+| first inference retained RSS MiB | 53.480 | 2.492 |
+| RSS after startup MiB | 963.098 | 247.793 |
+| peak process RSS MiB | 970.090 | 271.902 |
+| cold start seconds | 8.447 | 2.489 |
+| dense handler p95 ms | 59.319 | 87.811 |
+| hybrid handler p95 ms | 181.997 | 226.972 |
+| query encoder artifact MiB | 87.0 model cache | 86.879 export |
+
+The sentence-transformers split shows that importing the PyTorch-based framework, rather than
+constructing MiniLM alone, caused most retained memory. The ONNX profile passed the versioned
+limits of 900 MiB peak RSS, 15 seconds cold start, and 250 ms hybrid p95. It is adopted as the
+selected serving backend. Its latency is slower in this local run but remains within budget and
+leaves about 628 MiB below the process-memory limit for the next measured reranking experiment.
+
+Exported model files, tokenizers, run files, parity reports, and benchmark JSON remain ignored.
+The tracked configs and this aggregate summary contain no patient records or detailed trial data.

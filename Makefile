@@ -1,7 +1,7 @@
 PYTHON ?= python3
 PYTHONPATH ?= src
 
-.PHONY: install install-dev install-ui install-dense test compile ingest-sample ingest-ctgov-sample build-trial-store-sample build-trec-2021-trial-store report-ctgov-sample search-ctgov-sample download-ctgov-small build-trec-corpus-smoke build-bm25-index-sample evaluate-baseline evaluate-trec-bm25-sample compare-metrics-sample split-trec-2021-topics run-trec-2021-bm25 run-trec-2021-fielded-bm25 run-trec-2021-fielded-bm25-candidate run-trec-2021-sqlite-fts5 compare-trec-2021-bm25 compare-trec-2021-lexical-backends evaluate-trec-2021-lexical-holdout run-trec-2021-dense run-trec-2021-dense-biomedical convert-trec-2021-dense-mmap run-trec-2021-dense-mmap-int8 compare-trec-2021-dense-optimization compare-trec-2021-dense-ablation compare-trec-2021-lexical-dense run-trec-2021-hybrid run-trec-2021-hybrid-sqlite compare-trec-2021-retrievers compare-trec-2021-hybrid-backends benchmark-trec-2021-serving benchmark-trec-2021-serving-mmap benchmark-trec-2021-serving-mmap-int8 assess-trec-2021-serving-budget benchmark-trec-2021-lexical-backends check-retrieval-regression ingest-trec-sample validate-trec-sample write-manifest-sample api ui docker-up docker-down docker-smoke clean
+.PHONY: install install-dev install-ui install-dense install-onnx test compile ingest-sample ingest-ctgov-sample build-trial-store-sample build-trec-2021-trial-store report-ctgov-sample search-ctgov-sample download-ctgov-small build-trec-corpus-smoke build-bm25-index-sample evaluate-baseline evaluate-trec-bm25-sample compare-metrics-sample split-trec-2021-topics run-trec-2021-bm25 run-trec-2021-fielded-bm25 run-trec-2021-fielded-bm25-candidate run-trec-2021-sqlite-fts5 compare-trec-2021-bm25 compare-trec-2021-lexical-backends evaluate-trec-2021-lexical-holdout run-trec-2021-dense run-trec-2021-dense-biomedical export-trec-2021-onnx-encoder run-trec-2021-dense-onnx check-trec-2021-dense-onnx-parity convert-trec-2021-dense-mmap run-trec-2021-dense-mmap-int8 compare-trec-2021-dense-optimization compare-trec-2021-dense-ablation compare-trec-2021-lexical-dense run-trec-2021-hybrid run-trec-2021-hybrid-sqlite compare-trec-2021-retrievers compare-trec-2021-hybrid-backends benchmark-trec-2021-serving benchmark-trec-2021-serving-sentence-transformers benchmark-trec-2021-serving-mmap benchmark-trec-2021-serving-mmap-int8 assess-trec-2021-serving-budget benchmark-trec-2021-lexical-backends check-retrieval-regression ingest-trec-sample validate-trec-sample write-manifest-sample api ui docker-up docker-down docker-smoke clean
 
 install:
 	$(PYTHON) -m pip install -e .
@@ -14,6 +14,9 @@ install-ui:
 
 install-dense:
 	$(PYTHON) -m pip install -e ".[dense]"
+
+install-onnx:
+	$(PYTHON) -m pip install -e ".[dense,onnx]"
 
 test:
 	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m unittest discover -s tests
@@ -155,8 +158,25 @@ evaluate-trec-2021-lexical-holdout:
 		--config configs/experiments/trec_2021/holdout_fielded_bm25_condition_title_v1.json
 
 run-trec-2021-dense:
-	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m clinical_trial_matching.cli run-dense-experiment \
+	PYTHONPATH=$(PYTHONPATH) HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 $(PYTHON) -m clinical_trial_matching.cli run-dense-experiment \
 		--config configs/experiments/trec_2021/development_dense_all_minilm_l6_v2.json
+
+export-trec-2021-onnx-encoder:
+	PYTHONPATH=$(PYTHONPATH) HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 $(PYTHON) -m clinical_trial_matching.cli export-onnx-encoder \
+		--model-name sentence-transformers/all-MiniLM-L6-v2 \
+		--max-seq-length 256 \
+		--output data/models/onnx/all-MiniLM-L6-v2
+
+run-trec-2021-dense-onnx:
+	PYTHONPATH=$(PYTHONPATH) HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 $(PYTHON) -m clinical_trial_matching.cli run-dense-experiment \
+		--config configs/experiments/trec_2021/development_dense_all_minilm_l6_v2_onnx.json
+
+check-trec-2021-dense-onnx-parity:
+	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m clinical_trial_matching.cli check-trec-run-parity \
+		--baseline outputs/trec_2021_development_dense_all_minilm_l6_v2.run \
+		--candidate outputs/trec_2021_development_dense_all_minilm_l6_v2_onnx.run \
+		--depth 100 \
+		--output outputs/trec_2021_dense_onnx_parity.json
 
 convert-trec-2021-dense-mmap:
 	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m clinical_trial_matching.cli convert-dense-index-mmap \
@@ -223,6 +243,10 @@ compare-trec-2021-retrievers:
 benchmark-trec-2021-serving:
 	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m clinical_trial_matching.cli benchmark-serving \
 		--config configs/benchmarks/trec_2021_local_serving.json
+
+benchmark-trec-2021-serving-sentence-transformers:
+	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m clinical_trial_matching.cli benchmark-serving \
+		--config configs/benchmarks/trec_2021_local_serving_sentence_transformers.json
 
 benchmark-trec-2021-serving-mmap-int8:
 	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m clinical_trial_matching.cli benchmark-serving \

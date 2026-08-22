@@ -26,6 +26,7 @@ from clinical_trial_matching.evaluation.experiments import (
     load_sqlite_fts_experiment,
 )
 from clinical_trial_matching.evaluation.metrics import summarize_run
+from clinical_trial_matching.evaluation.parity import trec_run_parity_report
 from clinical_trial_matching.evaluation.regression import (
     DEFAULT_THRESHOLDS,
     run_bm25_regression_check,
@@ -78,9 +79,12 @@ from clinical_trial_matching.retrieval.bm25 import (
 )
 from clinical_trial_matching.retrieval.dense import (
     DENSE_RETRIEVER_NAME,
+    DENSE_SCORE_TIE_DECIMALS,
+    ENCODER_BACKENDS,
     TEXT_REPRESENTATIONS,
     SentenceTransformerEncoder,
     build_dense_index,
+    export_onnx_encoder,
     load_dense_index,
     load_or_build_dense_retriever,
     save_dense_index,
@@ -129,7 +133,10 @@ def main() -> None:
 
     trec_corpus = subparsers.add_parser(
         "build-trec-trial-corpus",
-        help="Extract NCT IDs from qrels, fetch ClinicalTrials.gov records, and normalize a trial corpus.",
+        help=(
+            "Extract NCT IDs from qrels, fetch ClinicalTrials.gov records, and normalize a trial "
+            "corpus."
+        ),
     )
     trec_corpus.add_argument("--qrels", type=Path, required=True)
     trec_corpus.add_argument("--raw-output", type=Path, required=True)
@@ -170,7 +177,10 @@ def main() -> None:
 
     trec_bm25 = subparsers.add_parser(
         "evaluate-trec-bm25",
-        help="Write a TREC-format BM25 run file and metrics report from normalized benchmark files.",
+        help=(
+            "Write a TREC-format BM25 run file and metrics report from normalized benchmark "
+            "files."
+        ),
     )
     trec_bm25.add_argument("--trials", type=Path, required=True)
     trec_bm25.add_argument("--topics", type=Path, required=True)
@@ -199,9 +209,17 @@ def main() -> None:
     regression.add_argument("--qrels", type=Path, required=True)
     regression.add_argument("--output", type=Path, required=True)
     regression.add_argument("--top-k", type=int, default=100)
-    regression.add_argument("--min-recall-at-100", type=float, default=DEFAULT_THRESHOLDS["recall_at_100"])
+    regression.add_argument(
+        "--min-recall-at-100",
+        type=float,
+        default=DEFAULT_THRESHOLDS["recall_at_100"],
+    )
     regression.add_argument("--min-mrr", type=float, default=DEFAULT_THRESHOLDS["mrr"])
-    regression.add_argument("--min-ndcg-at-10", type=float, default=DEFAULT_THRESHOLDS["ndcg_at_10"])
+    regression.add_argument(
+        "--min-ndcg-at-10",
+        type=float,
+        default=DEFAULT_THRESHOLDS["ndcg_at_10"],
+    )
 
     trial_report = subparsers.add_parser(
         "report-trial-corpus", help="Summarize a normalized trial JSONL corpus."
@@ -221,7 +239,11 @@ def main() -> None:
     trial_search.add_argument("--rebuild-index", action="store_true")
     trial_search.add_argument("--top-k", type=int, default=10)
     trial_search.add_argument("--snippet-chars", type=int, default=240)
-    trial_search.add_argument("--retriever", choices=["bm25", "fielded-bm25"], default="fielded-bm25")
+    trial_search.add_argument(
+        "--retriever",
+        choices=["bm25", "fielded-bm25"],
+        default="fielded-bm25",
+    )
     trial_search.add_argument(
         "--field-weight",
         action="append",
@@ -296,6 +318,18 @@ def main() -> None:
     dense_index_conversion.add_argument("--config", type=Path, required=True)
     dense_index_conversion.add_argument("--output", type=Path, required=True)
 
+    onnx_export = subparsers.add_parser(
+        "export-onnx-encoder",
+        help="Export a local sentence-transformer query encoder for ONNX Runtime.",
+    )
+    onnx_export.add_argument(
+        "--model-name",
+        default="sentence-transformers/all-MiniLM-L6-v2",
+    )
+    onnx_export.add_argument("--output", type=Path, required=True)
+    onnx_export.add_argument("--device", default="cpu")
+    onnx_export.add_argument("--max-seq-length", type=int, default=256)
+
     dense_evaluation = subparsers.add_parser(
         "evaluate-trec-dense",
         help="Evaluate a sentence-transformer bi-encoder on normalized TREC benchmark files.",
@@ -312,6 +346,12 @@ def main() -> None:
     dense_evaluation.add_argument("--top-k", type=int, default=100)
     dense_evaluation.add_argument("--rebuild-index", action="store_true")
     dense_evaluation.add_argument("--dynamic-quantization", action="store_true")
+    dense_evaluation.add_argument(
+        "--encoder-backend",
+        choices=sorted(ENCODER_BACKENDS),
+        default="sentence-transformers",
+    )
+    dense_evaluation.add_argument("--onnx-model-path", type=Path)
 
     dense_experiment = subparsers.add_parser(
         "run-dense-experiment",
@@ -319,6 +359,15 @@ def main() -> None:
     )
     dense_experiment.add_argument("--config", type=Path, required=True)
     dense_experiment.add_argument("--rebuild-index", action="store_true")
+
+    run_parity = subparsers.add_parser(
+        "check-trec-run-parity",
+        help="Require exact per-topic NCT ordering between two TREC run files.",
+    )
+    run_parity.add_argument("--baseline", type=Path, required=True)
+    run_parity.add_argument("--candidate", type=Path, required=True)
+    run_parity.add_argument("--depth", type=int, default=100)
+    run_parity.add_argument("--output", type=Path, required=True)
 
     rrf_experiment = subparsers.add_parser(
         "run-rrf-experiment",
@@ -346,7 +395,10 @@ def main() -> None:
         "--view",
         action="append",
         default=[],
-        help="Optional metric view to include, such as eligible_only. May be provided multiple times.",
+        help=(
+            "Optional metric view to include, such as eligible_only. May be provided multiple "
+            "times."
+        ),
     )
 
     serving_benchmark = subparsers.add_parser(
@@ -544,6 +596,13 @@ def main() -> None:
         )
     elif args.command == "convert-dense-index-mmap":
         convert_dense_index_mmap(args.config, args.output)
+    elif args.command == "export-onnx-encoder":
+        export_onnx_encoder_command(
+            model_name=args.model_name,
+            output_path=args.output,
+            device=args.device,
+            max_seq_length=args.max_seq_length,
+        )
     elif args.command == "evaluate-trec-dense":
         evaluate_trec_dense(
             trials_path=args.trials,
@@ -562,9 +621,18 @@ def main() -> None:
             max_seq_length=args.max_seq_length,
             rebuild_index=args.rebuild_index,
             dynamic_quantization=args.dynamic_quantization,
+            encoder_backend=args.encoder_backend,
+            onnx_model_path=args.onnx_model_path,
         )
     elif args.command == "run-dense-experiment":
         run_dense_experiment(args.config, rebuild_index=args.rebuild_index)
+    elif args.command == "check-trec-run-parity":
+        check_trec_run_parity(
+            baseline_path=args.baseline,
+            candidate_path=args.candidate,
+            depth=args.depth,
+            output_path=args.output,
+        )
     elif args.command == "run-rrf-experiment":
         run_rrf_experiment(args.config)
     elif args.command == "compare-metrics":
@@ -768,7 +836,12 @@ def evaluate_baseline(
         for topic in topics
     }
     metrics = summarize_run(run, qrels)
-    payload = {"run_name": "sample_bm25", "metrics": metrics, "topics": len(topics), "trials": len(trials)}
+    payload = {
+        "run_name": "sample_bm25",
+        "metrics": metrics,
+        "topics": len(topics),
+        "trials": len(trials),
+    }
     write_json(output_path, payload)
     print(f"Wrote baseline metrics to {output_path}")
 
@@ -1159,6 +1232,25 @@ def build_dense_index_command(
     )
 
 
+def export_onnx_encoder_command(
+    *,
+    model_name: str,
+    output_path: Path,
+    device: str,
+    max_seq_length: int,
+) -> None:
+    metadata = export_onnx_encoder(
+        model_name=model_name,
+        output_path=output_path,
+        device=device,
+        max_seq_length=max_seq_length,
+    )
+    print(
+        f"Wrote {metadata['embedding_dimension']}-dimensional ONNX encoder "
+        f"to {output_path}"
+    )
+
+
 def evaluate_trec_dense(
     *,
     trials_path: Path,
@@ -1177,6 +1269,8 @@ def evaluate_trec_dense(
     max_seq_length: int | None,
     rebuild_index: bool = False,
     dynamic_quantization: bool = False,
+    encoder_backend: str = "sentence-transformers",
+    onnx_model_path: Path | None = None,
     experiment_metadata: dict[str, str | int | bool] | None = None,
 ) -> None:
     trials = [trial_from_flat_record(row) for row in read_jsonl(trials_path)]
@@ -1192,6 +1286,8 @@ def evaluate_trec_dense(
         index_path=index_path,
         rebuild_index=rebuild_index,
         dynamic_quantization=dynamic_quantization,
+        encoder_backend=encoder_backend,
+        onnx_model_path=onnx_model_path,
     )
     rows = build_dense_trec_run(
         retriever=retriever,
@@ -1210,6 +1306,8 @@ def evaluate_trec_dense(
         "query_encoder_quantization": (
             "dynamic_int8" if dynamic_quantization else "fp32"
         ),
+        "query_encoder_backend": encoder_backend,
+        "score_tie_decimals": DENSE_SCORE_TIE_DECIMALS,
         "embedding_dimension": retriever.index.metadata["embedding_dimension"],
         "index_schema_version": retriever.index.metadata["schema_version"],
         "corpus_fingerprint": retriever.index.metadata["corpus_fingerprint"],
@@ -1267,7 +1365,36 @@ def run_dense_experiment(config_path: Path, *, rebuild_index: bool = False) -> N
         max_seq_length=experiment.max_seq_length,
         rebuild_index=rebuild_index,
         dynamic_quantization=experiment.dynamic_quantization,
+        encoder_backend=experiment.encoder_backend,
+        onnx_model_path=experiment.onnx_model_path,
         experiment_metadata=experiment.metadata(),
+    )
+
+
+def check_trec_run_parity(
+    *,
+    baseline_path: Path,
+    candidate_path: Path,
+    depth: int,
+    output_path: Path,
+) -> None:
+    report = trec_run_parity_report(
+        baseline_path,
+        candidate_path,
+        depth=depth,
+    )
+    write_json(output_path, report)
+    if not report["passed"]:
+        topics = report["topics"]
+        raise SystemExit(
+            "TREC run parity failed: "
+            f"{topics['mismatched']} ranking mismatches, "
+            f"{len(topics['missing_from_candidate'])} missing topics, and "
+            f"{len(topics['unexpected_in_candidate'])} unexpected topics"
+        )
+    print(
+        f"TREC run parity passed for {report['topics']['matching']} topics "
+        f"through rank {depth}; wrote {output_path}"
     )
 
 

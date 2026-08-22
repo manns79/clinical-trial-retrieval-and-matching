@@ -24,6 +24,7 @@ HAS_FASTAPI = importlib.util.find_spec("fastapi") is not None
 class ApiSearchTest(unittest.TestCase):
     def setUp(self) -> None:
         from clinical_trial_matching.api.main import (
+            load_dense_encoder_framework,
             load_dense_search_encoder,
             load_dense_search_index,
             load_dense_search_retriever,
@@ -31,6 +32,7 @@ class ApiSearchTest(unittest.TestCase):
             load_sqlite_search_retriever,
             load_trial_corpus,
             load_trial_metadata_store,
+            warm_dense_search_encoder,
         )
 
         load_trial_corpus.cache_clear()
@@ -38,7 +40,9 @@ class ApiSearchTest(unittest.TestCase):
         load_search_retriever.cache_clear()
         load_sqlite_search_retriever.cache_clear()
         load_dense_search_index.cache_clear()
+        load_dense_encoder_framework.cache_clear()
         load_dense_search_encoder.cache_clear()
+        warm_dense_search_encoder.cache_clear()
         load_dense_search_retriever.cache_clear()
         self.environment_names = (
             "TRIAL_CORPUS_PATH",
@@ -53,6 +57,8 @@ class ApiSearchTest(unittest.TestCase):
             "DENSE_DEVICE",
             "DENSE_MAX_SEQ_LENGTH",
             "DENSE_DYNAMIC_QUANTIZATION",
+            "DENSE_ENCODER_BACKEND",
+            "DENSE_ONNX_MODEL_PATH",
             "RRF_K",
             "RRF_CANDIDATE_DEPTH",
         )
@@ -62,6 +68,7 @@ class ApiSearchTest(unittest.TestCase):
 
     def tearDown(self) -> None:
         from clinical_trial_matching.api.main import (
+            load_dense_encoder_framework,
             load_dense_search_encoder,
             load_dense_search_index,
             load_dense_search_retriever,
@@ -69,6 +76,7 @@ class ApiSearchTest(unittest.TestCase):
             load_sqlite_search_retriever,
             load_trial_corpus,
             load_trial_metadata_store,
+            warm_dense_search_encoder,
         )
 
         for name, previous_value in self.previous_environment.items():
@@ -81,7 +89,9 @@ class ApiSearchTest(unittest.TestCase):
         load_search_retriever.cache_clear()
         load_sqlite_search_retriever.cache_clear()
         load_dense_search_index.cache_clear()
+        load_dense_encoder_framework.cache_clear()
         load_dense_search_encoder.cache_clear()
+        warm_dense_search_encoder.cache_clear()
         load_dense_search_retriever.cache_clear()
 
     def test_search_returns_traceable_sqlite_records_from_configured_corpus(self) -> None:
@@ -233,6 +243,7 @@ class ApiSearchTest(unittest.TestCase):
 
     def test_dense_loader_initializes_model_and_index_once(self) -> None:
         from clinical_trial_matching.api.main import (
+            load_dense_encoder_framework,
             load_dense_search_encoder,
             load_dense_search_index,
             load_dense_search_retriever,
@@ -249,17 +260,23 @@ class ApiSearchTest(unittest.TestCase):
             os.environ["DENSE_INDEX_PATH"] = str(index_path)
             load_trial_corpus.cache_clear()
             load_dense_search_index.cache_clear()
+            load_dense_encoder_framework.cache_clear()
             load_dense_search_encoder.cache_clear()
             load_dense_search_retriever.cache_clear()
             index = SimpleNamespace(nct_ids=("NCT1", "NCT2"), metadata={})
             encoder = object()
+            framework = object()
             with (
                 patch(
                     "clinical_trial_matching.api.main.load_dense_index_for_corpus",
                     return_value=index,
                 ) as index_loader,
                 patch(
-                    "clinical_trial_matching.api.main.SentenceTransformerEncoder",
+                    "clinical_trial_matching.api.main.load_encoder_framework",
+                    return_value=framework,
+                ) as framework_loader,
+                patch(
+                    "clinical_trial_matching.api.main.construct_text_encoder",
                     return_value=encoder,
                 ) as encoder_loader,
             ):
@@ -270,6 +287,7 @@ class ApiSearchTest(unittest.TestCase):
         self.assertIs(first.index, index)
         self.assertIs(first.encoder, encoder)
         index_loader.assert_called_once()
+        framework_loader.assert_called_once_with("sentence-transformers")
         encoder_loader.assert_called_once()
 
     def test_dense_search_returns_503_without_configured_index(self) -> None:
@@ -315,7 +333,9 @@ class ApiSearchTest(unittest.TestCase):
                 return_value=Path("dense.npz"),
             ),
             patch("clinical_trial_matching.api.main.load_dense_search_index"),
+            patch("clinical_trial_matching.api.main.load_dense_encoder_framework"),
             patch("clinical_trial_matching.api.main.load_dense_search_encoder"),
+            patch("clinical_trial_matching.api.main.warm_dense_search_encoder"),
             patch("clinical_trial_matching.api.main.load_dense_search_retriever"),
         ):
             preload_search_resources(on_phase_complete=completed.append)
@@ -326,7 +346,9 @@ class ApiSearchTest(unittest.TestCase):
                 "trial_metadata_store",
                 "sqlite_fts5",
                 "dense_embedding_index",
+                "dense_encoder_framework",
                 "dense_encoder_model",
+                "dense_encoder_first_inference_thread_pool",
                 "dense_retriever_assembly",
             ],
         )
@@ -354,6 +376,25 @@ class ApiSearchTest(unittest.TestCase):
             with_dense["available_retrievers"],
             ["sqlite-fts5", "fielded-bm25", "bm25", "dense", "hybrid"],
         )
+
+    def test_health_does_not_advertise_onnx_without_local_artifact(self) -> None:
+        from clinical_trial_matching.api.main import metrics_health
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            corpus_path = self._write_search_corpus(root)
+            index_path = root / "dense.npz"
+            index_path.touch()
+            os.environ["TRIAL_CORPUS_PATH"] = str(corpus_path)
+            self._configure_trial_store(corpus_path)
+            os.environ["DENSE_INDEX_PATH"] = str(index_path)
+            os.environ["DENSE_ENCODER_BACKEND"] = "onnxruntime"
+            os.environ["DENSE_ONNX_MODEL_PATH"] = str(root / "missing-onnx")
+
+            health = metrics_health()
+
+        self.assertNotIn("dense", health["available_retrievers"])
+        self.assertFalse(health["checks"]["dense_encoder_artifact_exists"])
 
     def test_timing_middleware_adds_process_time_header(self) -> None:
         import asyncio

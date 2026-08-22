@@ -54,6 +54,8 @@ Current dense retrieval status:
   serving-memory contributor.
 - A local SQLite FTS5 prototype preserves competitive development quality, reduces lexical
   retained RSS from about 2.8 GiB to about 3 MiB, and is now the default/hybrid serving backend.
+- A local ONNX Runtime MiniLM query encoder preserves exact development top-100 rankings, reduces
+  measured serving peak RSS below the 900 MiB target, and is now the selected dense backend.
 
 ## Milestone 4: Reranking
 

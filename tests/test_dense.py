@@ -145,6 +145,27 @@ class DenseRetrieverTest(unittest.TestCase):
         self.assertEqual(encoder.calls[0][1], 2)
         self.assertEqual(len(encoder.calls[1][0]), 2)
 
+    def test_dense_near_ties_use_nct_id_as_backend_independent_tiebreaker(self) -> None:
+        index = self._build_index()
+        index.embeddings[0] = np.asarray([1.0, 0.0, 0.0], dtype=np.float32)
+        index.embeddings[1] = np.asarray([1.0, 0.0, 0.0], dtype=np.float32)
+        reversed_index = type(index)(
+            embeddings=index.embeddings[::-1],
+            nct_ids=("NCT2", "NCT1"),
+            metadata=index.metadata,
+        )
+        encoder = FakeEncoder()
+        retriever = DenseRetriever(
+            None,
+            index=reversed_index,
+            encoder=encoder,
+            batch_size=2,
+        )
+
+        ranking = retriever.search("unmatched query", top_k=2)
+
+        self.assertEqual([result.nct_id for result in ranking], ["NCT1", "NCT2"])
+
     def test_persisted_numpy_index_round_trips_without_pickle(self) -> None:
         index = self._build_index()
         with tempfile.TemporaryDirectory() as tmpdir:

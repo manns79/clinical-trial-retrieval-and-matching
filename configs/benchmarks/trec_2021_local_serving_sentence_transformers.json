@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "name": "trec_2021_local_serving",
-  "description": "Selected local CPU serving profile using SQLite FTS5 and the parity-validated ONNX Runtime MiniLM encoder.",
+  "name": "trec_2021_local_serving_sentence_transformers",
+  "description": "Local CPU serving baseline using the PyTorch sentence-transformers MiniLM query encoder.",
   "project_root": "../..",
   "serving": {
     "corpus": "data/processed/clinicaltrials/trec_2021_qrels_trials.jsonl",
@@ -13,17 +13,12 @@
     "dense_batch_size": 64,
     "dense_device": "cpu",
     "dense_max_seq_length": 256,
-    "dense_encoder_backend": "onnxruntime",
-    "dense_onnx_model_path": "data/models/onnx/all-MiniLM-L6-v2",
+    "dense_dynamic_quantization": false,
     "rrf_k": 60,
     "rrf_candidate_depth": 100
   },
   "benchmark": {
-    "modes": [
-      "sqlite-fts5",
-      "dense",
-      "hybrid"
-    ],
+    "modes": ["sqlite-fts5", "dense", "hybrid"],
     "queries": [
       "Adult with persistent asthma and wheezing seeking an inhaled corticosteroid study.",
       "Child with type 1 diabetes using insulin and interested in glucose monitoring research.",
@@ -37,6 +32,6 @@
     "snippet_chars": 240
   },
   "artifacts": {
-    "output": "outputs/trec_2021_local_serving_benchmark.json"
+    "output": "outputs/trec_2021_local_serving_sentence_transformers_benchmark.json"
   }
 }

@@ -25,7 +25,9 @@ STARTUP_RESOURCE_PHASES = (
     "trial_metadata_store",
     "sqlite_fts5",
     "dense_embedding_index",
+    "dense_encoder_framework",
     "dense_encoder_model",
+    "dense_encoder_first_inference_thread_pool",
     "dense_retriever_assembly",
 )
 
@@ -45,6 +47,8 @@ class ServingBenchmark:
     dense_device: str
     dense_max_seq_length: int | None
     dense_dynamic_quantization: bool
+    dense_encoder_backend: str
+    dense_onnx_model_path: Path | None
     rrf_k: int
     rrf_candidate_depth: int
     modes: tuple[str, ...]
@@ -72,6 +76,10 @@ class ServingBenchmark:
                 "" if self.dense_max_seq_length is None else str(self.dense_max_seq_length)
             ),
             "DENSE_DYNAMIC_QUANTIZATION": str(self.dense_dynamic_quantization).lower(),
+            "DENSE_ENCODER_BACKEND": self.dense_encoder_backend,
+            "DENSE_ONNX_MODEL_PATH": (
+                "" if self.dense_onnx_model_path is None else str(self.dense_onnx_model_path)
+            ),
             "RRF_K": str(self.rrf_k),
             "RRF_CANDIDATE_DEPTH": str(self.rrf_candidate_depth),
             "HF_HUB_OFFLINE": "1",
@@ -200,6 +208,8 @@ def load_serving_benchmark(path: Path) -> ServingBenchmark:
             "dense_device",
             "dense_max_seq_length",
             "dense_dynamic_quantization",
+            "dense_encoder_backend",
+            "dense_onnx_model_path",
             "rrf_k",
             "rrf_candidate_depth",
         },
@@ -241,6 +251,27 @@ def load_serving_benchmark(path: Path) -> ServingBenchmark:
         )
     else:
         max_seq_length = None
+    dense_encoder_backend = serving.get(
+        "dense_encoder_backend",
+        "sentence-transformers",
+    )
+    if dense_encoder_backend not in {"sentence-transformers", "onnxruntime"}:
+        raise ValueError(
+            "serving.dense_encoder_backend must be sentence-transformers or onnxruntime"
+        )
+    dense_onnx_model_path = (
+        _project_path(project_root, serving, "dense_onnx_model_path", "serving")
+        if "dense_onnx_model_path" in serving
+        else None
+    )
+    if dense_encoder_backend == "onnxruntime" and dense_onnx_model_path is None:
+        raise ValueError(
+            "serving.dense_onnx_model_path is required for the onnxruntime backend"
+        )
+    if dense_encoder_backend != "onnxruntime" and dense_onnx_model_path is not None:
+        raise ValueError(
+            "serving.dense_onnx_model_path is only valid for the onnxruntime backend"
+        )
 
     return ServingBenchmark(
         name=name,
@@ -274,6 +305,8 @@ def load_serving_benchmark(path: Path) -> ServingBenchmark:
             default=False,
             prefix="serving.",
         ),
+        dense_encoder_backend=str(dense_encoder_backend),
+        dense_onnx_model_path=dense_onnx_model_path,
         rrf_k=_positive_integer(serving, "rrf_k", prefix="serving."),
         rrf_candidate_depth=_positive_integer(
             serving,
@@ -468,6 +501,7 @@ def run_serving_benchmark(
             "dense_model_name": benchmark.dense_model_name,
             "dense_text_representation": benchmark.dense_text_representation,
             "dense_dynamic_quantization": benchmark.dense_dynamic_quantization,
+            "dense_encoder_backend": benchmark.dense_encoder_backend,
             "rrf_k": benchmark.rrf_k,
             "rrf_candidate_depth": benchmark.rrf_candidate_depth,
         },
@@ -660,8 +694,16 @@ def serving_artifact_sizes(benchmark: ServingBenchmark) -> dict[str, Any]:
         ),
         "dense_index": _path_measure(benchmark.dense_index_path, benchmark.project_root),
     }
-    model_cache_path = huggingface_model_cache_path(benchmark.dense_model_name)
-    model_cache = _directory_measure(model_cache_path)
+    if benchmark.dense_onnx_model_path is not None:
+        files["dense_onnx_encoder"] = _path_measure(
+            benchmark.dense_onnx_model_path,
+            benchmark.project_root,
+        )
+    model_cache = (
+        _directory_measure(huggingface_model_cache_path(benchmark.dense_model_name))
+        if benchmark.dense_encoder_backend == "sentence-transformers"
+        else {"path": None, "exists": False, "bytes": 0, "mib": 0.0}
+    )
     total_file_bytes = sum(int(record["bytes"]) for record in files.values())
     return {
         "files": files,
@@ -693,6 +735,8 @@ def system_metadata() -> dict[str, Any]:
         "numpy",
         "torch",
         "sentence-transformers",
+        "onnxruntime",
+        "tokenizers",
     ):
         try:
             packages[package] = version(package)
@@ -729,8 +773,9 @@ def _validate_artifacts_exist(benchmark: ServingBenchmark) -> None:
             benchmark.trial_store_path,
             benchmark.sqlite_fts_index_path,
             benchmark.dense_index_path,
+            benchmark.dense_onnx_model_path,
         )
-        if not path.exists()
+        if path is not None and not path.exists()
     ]
     if missing:
         raise FileNotFoundError(

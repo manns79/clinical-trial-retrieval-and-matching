@@ -30,7 +30,9 @@ class FakeServingRuntime:
             "trial_metadata_store",
             "sqlite_fts5",
             "dense_embedding_index",
+            "dense_encoder_framework",
             "dense_encoder_model",
+            "dense_encoder_first_inference_thread_pool",
             "dense_retriever_assembly",
         ):
             if on_phase_complete is not None:
@@ -81,6 +83,8 @@ class ServingBenchmarkTest(unittest.TestCase):
         self.assertEqual(benchmark.modes, PRIMARY_MODES)
         self.assertEqual(benchmark.warmup_rounds, 1)
         self.assertEqual(benchmark.measurement_rounds, 5)
+        self.assertEqual(benchmark.dense_encoder_backend, "onnxruntime")
+        self.assertIsNotNone(benchmark.dense_onnx_model_path)
         self.assertIn("/outputs/", benchmark.output_path.as_posix())
         self.assertNotIn("/holdout/", benchmark.corpus_path.as_posix())
 
@@ -141,7 +145,9 @@ class ServingBenchmarkTest(unittest.TestCase):
                 "trial_metadata_store",
                 "sqlite_fts5",
                 "dense_embedding_index",
+                "dense_encoder_framework",
                 "dense_encoder_model",
+                "dense_encoder_first_inference_thread_pool",
                 "dense_retriever_assembly",
             ],
         )

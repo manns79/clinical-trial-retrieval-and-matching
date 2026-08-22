@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import math
+import os
 import tempfile
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
@@ -15,6 +17,9 @@ from clinical_trial_matching.retrieval.bm25 import corpus_fingerprint
 DENSE_INDEX_SCHEMA_VERSION = "1.0"
 DENSE_RETRIEVER_NAME = "dense-bi-encoder"
 DENSE_INDEX_MMAP_SUFFIX = ".mmap"
+DENSE_SCORE_TIE_DECIMALS = 6
+ONNX_ENCODER_SCHEMA_VERSION = "1.0"
+ENCODER_BACKENDS = {"sentence-transformers", "onnxruntime"}
 TEXT_REPRESENTATIONS = {
     "title": ("title",),
     "title_summary_conditions": ("title", "brief_summary", "conditions"),
@@ -62,19 +67,27 @@ class DenseIndex:
     metadata: dict[str, Any]
 
 
-class SentenceTransformerEncoder:
-    def __init__(self, model_name: str, *, device: str, max_seq_length: int | None) -> None:
-        try:
-            sentence_transformers = import_module("sentence_transformers")
-        except ImportError as exc:
-            raise RuntimeError(
-                'Install dense retrieval dependencies with `python -m pip install -e ".[dense]"`.'
-            ) from exc
+@dataclass(frozen=True)
+class EncoderFramework:
+    backend: str
+    modules: dict[str, Any]
 
+
+class SentenceTransformerEncoder:
+    def __init__(
+        self,
+        model_name: str,
+        *,
+        device: str,
+        max_seq_length: int | None,
+        sentence_transformers_module: Any | None = None,
+    ) -> None:
+        sentence_transformers = sentence_transformers_module or _sentence_transformers()
         self.model = sentence_transformers.SentenceTransformer(model_name, device=device)
         if max_seq_length is not None:
             self.model.max_seq_length = max_seq_length
         self.quantization = "fp32"
+        self.backend = "sentence-transformers"
 
     def quantize_dynamic_int8(self) -> None:
         torch = import_module("torch")
@@ -104,6 +117,160 @@ class SentenceTransformerEncoder:
             convert_to_numpy=True,
             normalize_embeddings=True,
         )
+
+
+class OnnxRuntimeEncoder:
+    def __init__(
+        self,
+        artifact_path: Path,
+        *,
+        model_name: str,
+        max_seq_length: int | None,
+        framework: EncoderFramework,
+    ) -> None:
+        if framework.backend != "onnxruntime":
+            raise ValueError("ONNX encoder requires the onnxruntime framework")
+        metadata_path = artifact_path / "metadata.json"
+        model_path = artifact_path / "model.onnx"
+        tokenizer_path = artifact_path / "tokenizer.json"
+        missing = [
+            path.name for path in (metadata_path, model_path, tokenizer_path) if not path.is_file()
+        ]
+        if missing:
+            raise ValueError(f"ONNX encoder artifact is missing files: {', '.join(missing)}")
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        if not isinstance(metadata, dict):
+            raise ValueError("ONNX encoder metadata must be a JSON object")
+        expected = {
+            "schema_version": ONNX_ENCODER_SCHEMA_VERSION,
+            "backend": "onnxruntime",
+            "model_name": model_name,
+            "max_seq_length": max_seq_length,
+            "normalize_embeddings": True,
+        }
+        mismatches = [key for key, value in expected.items() if metadata.get(key) != value]
+        if mismatches:
+            raise ValueError(
+                "ONNX encoder artifact is incompatible with the serving config: "
+                + ", ".join(mismatches)
+            )
+        if _sha256_file(model_path) != metadata.get("model_sha256"):
+            raise ValueError("ONNX encoder model checksum does not match its metadata")
+        if _sha256_file(tokenizer_path) != metadata.get("tokenizer_sha256"):
+            raise ValueError("ONNX encoder tokenizer checksum does not match its metadata")
+
+        tokenizers = framework.modules["tokenizers"]
+        onnxruntime = framework.modules["onnxruntime"]
+        self.tokenizer = tokenizers.Tokenizer.from_file(str(tokenizer_path))
+        self.tokenizer.enable_truncation(max_length=int(metadata["max_seq_length"]))
+        self.tokenizer.enable_padding(
+            pad_id=int(metadata["pad_token_id"]),
+            pad_token=str(metadata["pad_token"]),
+            pad_type_id=int(metadata.get("pad_token_type_id", 0)),
+        )
+        self.session = onnxruntime.InferenceSession(
+            str(model_path),
+            providers=["CPUExecutionProvider"],
+        )
+        self.input_names = tuple(input_value.name for input_value in self.session.get_inputs())
+        self.output_name = self.session.get_outputs()[0].name
+        self.np = framework.modules["numpy"]
+        self.metadata = metadata
+        self.quantization = str(metadata.get("quantization", "fp32"))
+        self.backend = "onnxruntime"
+
+    def encode(
+        self,
+        texts: Sequence[str],
+        *,
+        batch_size: int,
+        show_progress_bar: bool,
+    ) -> Any:
+        del show_progress_bar
+        if batch_size < 1:
+            raise ValueError("Dense batch size must be at least 1")
+        batches = []
+        for offset in range(0, len(texts), batch_size):
+            encodings = self.tokenizer.encode_batch(list(texts[offset : offset + batch_size]))
+            values = {
+                "input_ids": self.np.asarray(
+                    [encoding.ids for encoding in encodings], dtype=self.np.int64
+                ),
+                "attention_mask": self.np.asarray(
+                    [encoding.attention_mask for encoding in encodings], dtype=self.np.int64
+                ),
+                "token_type_ids": self.np.asarray(
+                    [encoding.type_ids for encoding in encodings], dtype=self.np.int64
+                ),
+            }
+            feeds = {name: values[name] for name in self.input_names}
+            batches.append(self.session.run([self.output_name], feeds)[0])
+        if not batches:
+            dimension = int(self.metadata["embedding_dimension"])
+            return self.np.empty((0, dimension), dtype=self.np.float32)
+        return self.np.concatenate(batches, axis=0)
+
+
+def load_encoder_framework(backend: str) -> EncoderFramework:
+    _validate_encoder_backend(backend)
+    if backend == "sentence-transformers":
+        return EncoderFramework(
+            backend=backend,
+            modules={"sentence_transformers": _sentence_transformers()},
+        )
+    try:
+        os.environ.setdefault("ORT_DISABLE_TELEMETRY", "1")
+        return EncoderFramework(
+            backend=backend,
+            modules={
+                "numpy": import_module("numpy"),
+                "onnxruntime": import_module("onnxruntime"),
+                "tokenizers": import_module("tokenizers"),
+            },
+        )
+    except ImportError as exc:
+        raise RuntimeError(
+            'Install the local ONNX runtime with `python -m pip install -e ".[onnx]"`.'
+        ) from exc
+
+
+def construct_text_encoder(
+    *,
+    backend: str,
+    framework: EncoderFramework,
+    model_name: str,
+    device: str,
+    max_seq_length: int | None,
+    onnx_model_path: Path | None = None,
+) -> TextEncoder:
+    _validate_encoder_backend(backend)
+    if framework.backend != backend:
+        raise ValueError("Dense encoder framework and configured backend do not match")
+    if backend == "sentence-transformers":
+        return SentenceTransformerEncoder(
+            model_name,
+            device=device,
+            max_seq_length=max_seq_length,
+            sentence_transformers_module=framework.modules["sentence_transformers"],
+        )
+    if device != "cpu":
+        raise ValueError("The ONNX Runtime prototype currently supports only the CPU device")
+    if onnx_model_path is None:
+        raise ValueError("The ONNX Runtime backend requires an ONNX model artifact path")
+    return OnnxRuntimeEncoder(
+        onnx_model_path,
+        model_name=model_name,
+        max_seq_length=max_seq_length,
+        framework=framework,
+    )
+
+
+def warm_up_text_encoder(encoder: TextEncoder, *, batch_size: int) -> None:
+    encoder.encode(
+        ["Adult with a documented condition seeking a clinical trial."],
+        batch_size=batch_size,
+        show_progress_bar=False,
+    )
 
 
 class DenseRetriever:
@@ -152,8 +319,10 @@ class DenseRetriever:
         scores = query_embeddings @ self.index.embeddings.T
         result_count = min(top_k, len(self.index.nct_ids))
         rankings: list[list[SearchResult]] = []
+        nct_id_values = np.asarray(self.index.nct_ids)
         for query_scores in scores:
-            ranked_indexes = np.argsort(-query_scores, kind="stable")[:result_count]
+            rounded_scores = np.round(query_scores, decimals=DENSE_SCORE_TIE_DECIMALS)
+            ranked_indexes = np.lexsort((nct_id_values, -rounded_scores))[:result_count]
             rankings.append(
                 [
                     SearchResult(
@@ -334,6 +503,8 @@ def load_or_build_dense_retriever(
     rebuild_index: bool = False,
     encoder_factory: Callable[[str, str, int | None], TextEncoder] | None = None,
     dynamic_quantization: bool = False,
+    encoder_backend: str = "sentence-transformers",
+    onnx_model_path: Path | None = None,
     show_progress_bar: bool = True,
 ) -> DenseRetriever:
     trial_list = list(trials)
@@ -344,8 +515,18 @@ def load_or_build_dense_retriever(
         device=device,
         max_seq_length=max_seq_length,
     )
-    factory = encoder_factory or _sentence_transformer_encoder
-    encoder = factory(model_name, device, max_seq_length)
+    if encoder_factory is not None:
+        encoder = encoder_factory(model_name, device, max_seq_length)
+    else:
+        framework = load_encoder_framework(encoder_backend)
+        encoder = construct_text_encoder(
+            backend=encoder_backend,
+            framework=framework,
+            model_name=model_name,
+            device=device,
+            max_seq_length=max_seq_length,
+            onnx_model_path=onnx_model_path,
+        )
 
     if index_path.exists() and not rebuild_index:
         index = load_dense_index(
@@ -369,6 +550,10 @@ def load_or_build_dense_retriever(
         save_dense_index(index_path, index)
 
     if dynamic_quantization:
+        if encoder_backend != "sentence-transformers":
+            raise ValueError(
+                "Dynamic PyTorch quantization is only supported by sentence-transformers"
+            )
         quantize = getattr(encoder, "quantize_dynamic_int8", None)
         if quantize is None:
             raise ValueError("Configured dense encoder does not support dynamic int8 quantization")
@@ -380,6 +565,137 @@ def load_or_build_dense_retriever(
         encoder=encoder,
         batch_size=batch_size,
     )
+
+
+def export_onnx_encoder(
+    *,
+    model_name: str,
+    output_path: Path,
+    device: str,
+    max_seq_length: int,
+) -> dict[str, Any]:
+    if device != "cpu":
+        raise ValueError("The ONNX Runtime prototype currently supports only CPU export")
+    if max_seq_length < 1:
+        raise ValueError("ONNX encoder max sequence length must be at least 1")
+    try:
+        torch = import_module("torch")
+        import_module("onnx")
+    except ImportError as exc:
+        raise RuntimeError(
+            'Install export dependencies with `python -m pip install -e ".[dense,onnx]"`.'
+        ) from exc
+
+    framework = load_encoder_framework("sentence-transformers")
+    encoder = construct_text_encoder(
+        backend="sentence-transformers",
+        framework=framework,
+        model_name=model_name,
+        device=device,
+        max_seq_length=max_seq_length,
+    )
+    model = encoder.model
+    if len(model) != 3:
+        raise ValueError("ONNX export expects Transformer, mean Pooling, and Normalize modules")
+    transformer = model[0]
+    pooling = model[1]
+    normalize = model[2]
+    pooling_mode = getattr(pooling, "pooling_mode", None)
+    legacy_mean_pooling = getattr(pooling, "pooling_mode_mean_tokens", False)
+    if pooling_mode != "mean" and not legacy_mean_pooling:
+        raise ValueError("ONNX export currently supports sentence-transformers mean pooling")
+    if normalize.__class__.__name__ != "Normalize":
+        raise ValueError("ONNX export expects a normalized sentence-transformer model")
+
+    class MeanPoolingEncoder(torch.nn.Module):  # type: ignore[name-defined]
+        def __init__(self, auto_model: Any) -> None:
+            super().__init__()
+            self.auto_model = auto_model
+
+        def forward(
+            self,
+            input_ids: Any,
+            attention_mask: Any,
+            token_type_ids: Any,
+        ) -> Any:
+            token_embeddings = self.auto_model(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                token_type_ids=token_type_ids,
+                return_dict=False,
+            )[0]
+            expanded_mask = attention_mask.unsqueeze(-1).expand(token_embeddings.size()).float()
+            pooled = torch.sum(token_embeddings * expanded_mask, 1) / torch.clamp(
+                expanded_mask.sum(1),
+                min=1e-9,
+            )
+            return torch.nn.functional.normalize(pooled, p=2, dim=1)
+
+    export_model = MeanPoolingEncoder(transformer.auto_model).eval()
+    tokenizer = transformer.tokenizer
+    encoded = tokenizer(
+        ["Clinical trial encoder export."],
+        padding=True,
+        truncation=True,
+        max_length=max_seq_length,
+        return_tensors="pt",
+    )
+    if "token_type_ids" not in encoded:
+        encoded["token_type_ids"] = torch.zeros_like(encoded["input_ids"])
+    input_names = ("input_ids", "attention_mask", "token_type_ids")
+    output_path.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(
+        mode="wb",
+        dir=output_path,
+        prefix=".model.",
+        suffix=".onnx.tmp",
+        delete=False,
+    ) as handle:
+        temporary_model_path = Path(handle.name)
+    try:
+        torch.onnx.export(
+            export_model,
+            tuple(encoded[name] for name in input_names),
+            temporary_model_path,
+            input_names=list(input_names),
+            output_names=["sentence_embedding"],
+            dynamic_axes={
+                name: {0: "batch", 1: "sequence"} for name in input_names
+            }
+            | {"sentence_embedding": {0: "batch"}},
+            opset_version=17,
+            do_constant_folding=True,
+            dynamo=False,
+        )
+        temporary_model_path.replace(output_path / "model.onnx")
+    finally:
+        if temporary_model_path.exists():
+            temporary_model_path.unlink()
+
+    tokenizer_path = output_path / "tokenizer.json"
+    tokenizer.backend_tokenizer.save(str(tokenizer_path))
+    with torch.inference_mode():
+        embedding_dimension = int(export_model(*(encoded[name] for name in input_names)).shape[1])
+    metadata = {
+        "schema_version": ONNX_ENCODER_SCHEMA_VERSION,
+        "backend": "onnxruntime",
+        "model_name": model_name,
+        "max_seq_length": max_seq_length,
+        "embedding_dimension": embedding_dimension,
+        "normalize_embeddings": True,
+        "pooling": "mean",
+        "quantization": "fp32",
+        "opset_version": 17,
+        "input_names": list(input_names),
+        "output_name": "sentence_embedding",
+        "pad_token": tokenizer.pad_token,
+        "pad_token_id": tokenizer.pad_token_id,
+        "pad_token_type_id": tokenizer.pad_token_type_id,
+        "model_sha256": _sha256_file(output_path / "model.onnx"),
+        "tokenizer_sha256": _sha256_file(tokenizer_path),
+    }
+    _atomic_write_text(output_path / "metadata.json", json.dumps(metadata, sort_keys=True))
+    return metadata
 
 
 def trial_text(trial: Trial, representation: str) -> str:
@@ -566,6 +882,14 @@ def _validate_dense_parameters(
         raise ValueError("Dense max sequence length must be at least 1")
 
 
+def _validate_encoder_backend(backend: str) -> None:
+    if backend not in ENCODER_BACKENDS:
+        raise ValueError(
+            f"Unknown dense encoder backend {backend!r}; expected one of "
+            + ", ".join(sorted(ENCODER_BACKENDS))
+        )
+
+
 def _sentence_transformer_encoder(
     model_name: str,
     device: str,
@@ -576,6 +900,23 @@ def _sentence_transformer_encoder(
         device=device,
         max_seq_length=max_seq_length,
     )
+
+
+def _sentence_transformers() -> Any:
+    try:
+        return import_module("sentence_transformers")
+    except ImportError as exc:
+        raise RuntimeError(
+            'Install dense retrieval dependencies with `python -m pip install -e ".[dense]"`.'
+        ) from exc
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def _numpy() -> Any:

@@ -25,9 +25,12 @@ from clinical_trial_matching.retrieval.bm25 import (
     normalized_field_weights,
 )
 from clinical_trial_matching.retrieval.dense import (
+    DENSE_SCORE_TIE_DECIMALS,
     DenseRetriever,
-    SentenceTransformerEncoder,
+    construct_text_encoder,
     load_dense_index_for_corpus,
+    load_encoder_framework,
+    warm_up_text_encoder,
 )
 from clinical_trial_matching.retrieval.hybrid import (
     RankedResults,
@@ -52,6 +55,7 @@ DEFAULT_DENSE_TEXT_REPRESENTATION = "title_summary_conditions"
 DEFAULT_DENSE_BATCH_SIZE = 64
 DEFAULT_DENSE_DEVICE = "cpu"
 DEFAULT_DENSE_MAX_SEQ_LENGTH = 256
+DEFAULT_DENSE_ENCODER_BACKEND = "sentence-transformers"
 DEFAULT_RRF_K = 60
 DEFAULT_RRF_CANDIDATE_DEPTH = 100
 SERVING_FIELD_WEIGHTS = {
@@ -79,6 +83,8 @@ class DenseServingConfig:
     device: str
     max_seq_length: int | None
     dynamic_quantization: bool
+    encoder_backend: str
+    onnx_model_path: Path | None
 
 
 class SearchRequest(BaseModel):
@@ -288,13 +294,28 @@ def metrics_health() -> dict[str, object]:
     trial_store_path = get_trial_store_path()
     index_path = get_bm25_index_path()
     dense_index_path = get_dense_index_path()
+    dense_encoder_backend = os.getenv(
+        "DENSE_ENCODER_BACKEND",
+        DEFAULT_DENSE_ENCODER_BACKEND,
+    )
+    dense_onnx_model_path_value = os.getenv("DENSE_ONNX_MODEL_PATH", "").strip()
+    dense_encoder_artifact_exists = (
+        dense_encoder_backend != "onnxruntime"
+        or bool(dense_onnx_model_path_value)
+        and Path(dense_onnx_model_path_value).exists()
+    )
     sqlite_fts_index_path = get_sqlite_fts_index_path()
     corpus_exists = corpus_path.exists()
     trial_store_exists = trial_store_path.exists()
     sqlite_fts_index_exists = sqlite_fts_index_path.exists()
     dense_index_exists = dense_index_path is not None and dense_index_path.exists()
     available_retrievers = ["sqlite-fts5", "fielded-bm25", "bm25"]
-    if corpus_exists and trial_store_exists and dense_index_exists:
+    if (
+        corpus_exists
+        and trial_store_exists
+        and dense_index_exists
+        and dense_encoder_artifact_exists
+    ):
         available_retrievers.extend(["dense", "hybrid"])
     return {
         "status": "ok",
@@ -309,7 +330,12 @@ def metrics_health() -> dict[str, object]:
             "dense_index_configured": dense_index_path is not None,
             "dense_index_exists": dense_index_exists,
             "dense_index_loaded": load_dense_search_index.cache_info().currsize > 0,
+            "dense_encoder_artifact_exists": dense_encoder_artifact_exists,
+            "dense_encoder_framework_loaded": (
+                load_dense_encoder_framework.cache_info().currsize > 0
+            ),
             "dense_encoder_loaded": load_dense_search_encoder.cache_info().currsize > 0,
+            "dense_encoder_warmed": warm_dense_search_encoder.cache_info().currsize > 0,
             "dense_retriever_loaded": load_dense_search_retriever.cache_info().currsize > 0,
         },
         "available_retrievers": available_retrievers,
@@ -318,6 +344,8 @@ def metrics_health() -> dict[str, object]:
         "bm25_index_path": index_path,
         "sqlite_fts_index_path": str(sqlite_fts_index_path),
         "dense_index_path": str(dense_index_path or ""),
+        "dense_encoder_backend": dense_encoder_backend,
+        "dense_onnx_model_path": dense_onnx_model_path_value,
     }
 
 
@@ -365,6 +393,15 @@ def get_dense_serving_config() -> DenseServingConfig:
             DEFAULT_DENSE_MAX_SEQ_LENGTH,
         ),
         dynamic_quantization=_boolean_env("DENSE_DYNAMIC_QUANTIZATION", False),
+        encoder_backend=os.getenv(
+            "DENSE_ENCODER_BACKEND",
+            DEFAULT_DENSE_ENCODER_BACKEND,
+        ),
+        onnx_model_path=(
+            Path(value)
+            if (value := os.getenv("DENSE_ONNX_MODEL_PATH", "").strip())
+            else None
+        ),
     )
 
 
@@ -463,21 +500,57 @@ def load_dense_search_index() -> Any:
 
 
 @lru_cache(maxsize=1)
+def load_dense_encoder_framework() -> Any:
+    config = get_dense_serving_config()
+    try:
+        return load_encoder_framework(config.encoder_backend)
+    except (ImportError, OSError, RuntimeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Dense encoder framework could not be loaded: {exc}",
+        ) from exc
+
+
+@lru_cache(maxsize=1)
 def load_dense_search_encoder() -> Any:
     config = get_dense_serving_config()
     try:
-        encoder = SentenceTransformerEncoder(
-            config.model_name,
+        encoder = construct_text_encoder(
+            backend=config.encoder_backend,
+            framework=load_dense_encoder_framework(),
+            model_name=config.model_name,
             device=config.device,
             max_seq_length=config.max_seq_length,
+            onnx_model_path=config.onnx_model_path,
         )
         if config.dynamic_quantization:
-            encoder.quantize_dynamic_int8()
+            quantize = getattr(encoder, "quantize_dynamic_int8", None)
+            if quantize is None:
+                raise ValueError(
+                    "DENSE_DYNAMIC_QUANTIZATION is only supported by sentence-transformers"
+                )
+            quantize()
         return encoder
     except (OSError, RuntimeError, ValueError) as exc:
         raise HTTPException(
             status_code=503,
             detail=f"Dense encoder could not be loaded: {exc}",
+        ) from exc
+
+
+@lru_cache(maxsize=1)
+def warm_dense_search_encoder() -> bool:
+    config = get_dense_serving_config()
+    try:
+        warm_up_text_encoder(
+            load_dense_search_encoder(),
+            batch_size=config.batch_size,
+        )
+        return True
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Dense encoder first inference failed: {exc}",
         ) from exc
 
 
@@ -507,9 +580,15 @@ def preload_search_resources(
         load_dense_search_index()
         if on_phase_complete is not None:
             on_phase_complete("dense_embedding_index")
+        load_dense_encoder_framework()
+        if on_phase_complete is not None:
+            on_phase_complete("dense_encoder_framework")
         load_dense_search_encoder()
         if on_phase_complete is not None:
             on_phase_complete("dense_encoder_model")
+        warm_dense_search_encoder()
+        if on_phase_complete is not None:
+            on_phase_complete("dense_encoder_first_inference_thread_pool")
         load_dense_search_retriever()
         if on_phase_complete is not None:
             on_phase_complete("dense_retriever_assembly")
@@ -563,6 +642,12 @@ def dense_parameters(retriever: Any, top_k: int) -> dict[str, Any]:
             "quantization",
             "unknown",
         ),
+        "query_encoder_backend": getattr(
+            getattr(retriever, "encoder", None),
+            "backend",
+            "unknown",
+        ),
+        "score_tie_decimals": DENSE_SCORE_TIE_DECIMALS,
     }
 
 

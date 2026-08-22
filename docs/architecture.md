@@ -82,9 +82,11 @@ capture handler and stage p50/p95 latency, sequential throughput, RSS, artifact 
 metadata under ignored `outputs/` paths.
 
 Startup profiling checkpoints the process after API import, trial-store validation, SQLite FTS5
-loading, dense index loading, encoder loading, and retriever assembly. Each checkpoint reports elapsed time,
-retained RSS change, and observed peak RSS change. These deltas describe one process on one host;
-they can be influenced by allocator behavior and operating-system filesystem caches.
+loading, dense index loading, encoder-framework import, model/session construction,
+first-inference/thread-pool initialization, and retriever assembly. Each checkpoint reports
+elapsed time, retained RSS change, and
+observed peak RSS change. These deltas describe one process on one host and can be influenced by
+allocator behavior and operating-system filesystem caches.
 
 This benchmark intentionally excludes HTTP transport and concurrency. It answers whether the
 single-process retrieval stack has plausible memory and latency headroom before adding a
@@ -95,11 +97,12 @@ requests, queueing, and worker-level memory duplication separately.
 
 The BM25 benchmark command reads normalized trial JSONL, normalized TREC topic JSONL, and qrels, then writes both a six-column TREC run file and a metrics JSON report. Generated run files and reports belong under ignored `outputs/` paths.
 
-The dense benchmark path uses a local sentence-transformer bi-encoder, batches normalized trial
-text into L2-normalized embeddings, and persists embeddings plus NCT IDs and compatibility
-metadata in an ignored NumPy `.npz` index. Query embeddings use the same encoder and cosine
-similarity is computed as a matrix product. Model files stay in the local model cache and are not
-committed.
+The dense benchmark path uses a local sentence-transformer to build L2-normalized corpus
+embeddings and persists them with NCT IDs and compatibility metadata in an ignored NumPy `.npz`
+index. The selected serving backend exports the same MiniLM query encoder to an ignored,
+checksum-validated ONNX artifact and runs it with `tokenizers` plus ONNX Runtime, without loading
+PyTorch. Query/corpus cosine similarity remains a matrix product. Six-decimal score ties resolve
+by NCT ID so numerically equivalent backends produce deterministic rankings.
 
 ## Benchmark Corpus Build
 

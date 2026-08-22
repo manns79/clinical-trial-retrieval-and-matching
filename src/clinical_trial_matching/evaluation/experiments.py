@@ -11,7 +11,7 @@ from clinical_trial_matching.retrieval.bm25 import (
     DEFAULT_FIELD_WEIGHTS,
     normalized_field_weights,
 )
-from clinical_trial_matching.retrieval.dense import TEXT_REPRESENTATIONS
+from clinical_trial_matching.retrieval.dense import ENCODER_BACKENDS, TEXT_REPRESENTATIONS
 from clinical_trial_matching.retrieval.sqlite_fts import (
     normalize_sqlite_fts_field_weights,
 )
@@ -61,6 +61,8 @@ class DenseExperiment:
     device: str
     max_seq_length: int | None
     dynamic_quantization: bool
+    encoder_backend: str
+    onnx_model_path: Path | None
     top_k: int
     trials_path: Path
     topics_path: Path
@@ -81,6 +83,7 @@ class DenseExperiment:
             "config_path": self.config_label,
             "config_sha256": self.config_sha256,
             "dynamic_quantization": self.dynamic_quantization,
+            "encoder_backend": self.encoder_backend,
         }
 
 
@@ -249,6 +252,8 @@ def load_dense_experiment(path: Path) -> DenseExperiment:
         "device",
         "max_seq_length",
         "dynamic_quantization",
+        "encoder_backend",
+        "onnx_model_path",
         "benchmark",
         "artifacts",
     }
@@ -308,6 +313,24 @@ def load_dense_experiment(path: Path) -> DenseExperiment:
     dynamic_quantization = payload.get("dynamic_quantization", False)
     if not isinstance(dynamic_quantization, bool):
         raise ValueError("dynamic_quantization must be a boolean")
+    encoder_backend = payload.get("encoder_backend", "sentence-transformers")
+    if not isinstance(encoder_backend, str) or encoder_backend not in ENCODER_BACKENDS:
+        raise ValueError(
+            "encoder_backend must be one of: " + ", ".join(sorted(ENCODER_BACKENDS))
+        )
+    onnx_model_path = (
+        _project_path(project_root, payload, "onnx_model_path", "config")
+        if "onnx_model_path" in payload
+        else None
+    )
+    if encoder_backend == "onnxruntime" and onnx_model_path is None:
+        raise ValueError("onnx_model_path is required for the onnxruntime encoder backend")
+    if encoder_backend != "onnxruntime" and onnx_model_path is not None:
+        raise ValueError("onnx_model_path is only valid for the onnxruntime encoder backend")
+    if dynamic_quantization and encoder_backend != "sentence-transformers":
+        raise ValueError(
+            "dynamic_quantization is only valid for the sentence-transformers backend"
+        )
 
     return DenseExperiment(
         name=name,
@@ -318,6 +341,8 @@ def load_dense_experiment(path: Path) -> DenseExperiment:
         device=device,
         max_seq_length=max_seq_length,
         dynamic_quantization=dynamic_quantization,
+        encoder_backend=encoder_backend,
+        onnx_model_path=onnx_model_path,
         top_k=top_k,
         trials_path=_project_path(project_root, benchmark, "trials", "benchmark"),
         topics_path=_project_path(project_root, benchmark, "topics", "benchmark"),
