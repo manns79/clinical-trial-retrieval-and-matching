@@ -20,6 +20,7 @@ BM25_EXPERIMENT_SCHEMA_VERSION = 1
 DENSE_EXPERIMENT_SCHEMA_VERSION = 1
 RRF_EXPERIMENT_SCHEMA_VERSION = 1
 SQLITE_FTS_EXPERIMENT_SCHEMA_VERSION = 1
+CROSS_ENCODER_EXPERIMENT_SCHEMA_VERSION = 1
 EXPERIMENT_NAME_RE = re.compile(r"[a-z0-9][a-z0-9_.-]*")
 
 
@@ -147,6 +148,53 @@ class RrfExperiment:
             "config_path": self.config_label,
             "config_sha256": self.config_sha256,
         }
+
+
+@dataclass(frozen=True)
+class CrossEncoderExperiment:
+    name: str
+    description: str
+    model_name: str
+    model_revision: str
+    text_representation: str
+    batch_size: int
+    device: str
+    max_length: int
+    candidate_depths: tuple[int, ...]
+    top_k: int
+    corpus_path: Path
+    trial_store_path: Path
+    topics_path: Path
+    qrels_path: Path
+    baseline_run_path: Path
+    baseline_metrics_path: Path
+    model_artifact_path: Path
+    serving_config_path: Path
+    peak_process_rss_mib: float
+    output_directory: Path
+    report_output_path: Path
+    headroom_output_path: Path
+    config_path: Path
+    config_label: str
+    config_sha256: str
+
+    def metadata(self) -> dict[str, str | int]:
+        return {
+            "name": self.name,
+            "description": self.description,
+            "schema_version": CROSS_ENCODER_EXPERIMENT_SCHEMA_VERSION,
+            "config_path": self.config_label,
+            "config_sha256": self.config_sha256,
+        }
+
+    def run_path(self, candidate_depth: int) -> Path:
+        return self.output_directory / f"{self.name}_depth_{candidate_depth}.run"
+
+    def metrics_path(self, candidate_depth: int) -> Path:
+        return self.output_directory / f"{self.name}_depth_{candidate_depth}_metrics.json"
+
+    def diagnostics_path(self, candidate_depth: int) -> Path:
+        return self.output_directory / f"{self.name}_depth_{candidate_depth}_diagnostics.json"
 
 
 def load_bm25_experiment(path: Path) -> Bm25Experiment:
@@ -416,6 +464,136 @@ def load_sqlite_fts_experiment(path: Path) -> SQLiteFtsExperiment:
         metrics_output_path=_project_path(project_root, artifacts, "metrics", "artifacts"),
         diagnostics_output_path=_project_path(
             project_root, artifacts, "diagnostics", "artifacts"
+        ),
+        config_path=config_path,
+        config_label=config_label,
+        config_sha256=hashlib.sha256(raw).hexdigest(),
+    )
+
+
+def load_cross_encoder_experiment(path: Path) -> CrossEncoderExperiment:
+    raw, payload = _read_experiment_json(path, "Cross-encoder")
+    _reject_unknown_fields(
+        payload,
+        "cross-encoder experiment config",
+        {
+            "schema_version",
+            "name",
+            "description",
+            "project_root",
+            "model",
+            "reranking",
+            "benchmark",
+            "serving_headroom",
+            "artifacts",
+        },
+    )
+    if payload.get("schema_version") != CROSS_ENCODER_EXPERIMENT_SCHEMA_VERSION:
+        raise ValueError("Unsupported cross-encoder experiment schema_version")
+    name = _validated_experiment_name(payload)
+    description = _required_string(payload, "description")
+    project_root = _project_root(path, payload)
+    model = _required_mapping(payload, "model")
+    _reject_unknown_fields(
+        model,
+        "model",
+        {"name", "revision", "artifact", "device", "max_length", "batch_size"},
+    )
+    model_name = _required_string(model, "name")
+    model_revision = _required_string(model, "revision")
+    device = _required_string(model, "device")
+    if device != "cpu":
+        raise ValueError("The local ONNX cross-encoder experiment supports only CPU")
+    max_length = _positive_integer(model, "max_length", prefix="model.")
+    batch_size = _positive_integer(model, "batch_size", prefix="model.")
+    reranking = _required_mapping(payload, "reranking")
+    _reject_unknown_fields(
+        reranking,
+        "reranking",
+        {"candidate_depths", "text_representation"},
+    )
+    text_representation = _required_string(reranking, "text_representation")
+    if text_representation not in TEXT_REPRESENTATIONS:
+        raise ValueError(f"Unknown cross-encoder text representation: {text_representation}")
+    raw_depths = reranking.get("candidate_depths")
+    if not isinstance(raw_depths, list) or not raw_depths:
+        raise ValueError("reranking.candidate_depths must be a non-empty integer list")
+    if any(
+        isinstance(depth, bool) or not isinstance(depth, int) or depth < 1
+        for depth in raw_depths
+    ):
+        raise ValueError("reranking.candidate_depths must contain positive integers")
+    candidate_depths = tuple(raw_depths)
+    if tuple(sorted(set(candidate_depths))) != candidate_depths:
+        raise ValueError("reranking.candidate_depths must be unique and ascending")
+
+    benchmark = _required_mapping(payload, "benchmark")
+    _reject_unknown_fields(
+        benchmark,
+        "benchmark",
+        {
+            "corpus",
+            "trial_store",
+            "topics",
+            "qrels",
+            "baseline_run",
+            "baseline_metrics",
+            "top_k",
+        },
+    )
+    top_k = _positive_integer(benchmark, "top_k", prefix="benchmark.")
+    if candidate_depths[-1] > top_k:
+        raise ValueError("Cross-encoder candidate depths cannot exceed benchmark.top_k")
+    serving = _required_mapping(payload, "serving_headroom")
+    _reject_unknown_fields(serving, "serving_headroom", {"config", "peak_process_rss_mib"})
+    peak_process_rss_mib = serving.get("peak_process_rss_mib")
+    if (
+        isinstance(peak_process_rss_mib, bool)
+        or not isinstance(peak_process_rss_mib, (int, float))
+        or peak_process_rss_mib <= 0
+    ):
+        raise ValueError("serving_headroom.peak_process_rss_mib must be positive")
+    artifacts = _required_mapping(payload, "artifacts")
+    _reject_unknown_fields(
+        artifacts,
+        "artifacts",
+        {"output_directory", "report", "headroom_report"},
+    )
+    config_path = path.resolve()
+    try:
+        config_label = config_path.relative_to(project_root).as_posix()
+    except ValueError:
+        config_label = config_path.name
+    return CrossEncoderExperiment(
+        name=name,
+        description=description,
+        model_name=model_name,
+        model_revision=model_revision,
+        text_representation=text_representation,
+        batch_size=batch_size,
+        device=device,
+        max_length=max_length,
+        candidate_depths=candidate_depths,
+        top_k=top_k,
+        corpus_path=_project_path(project_root, benchmark, "corpus", "benchmark"),
+        trial_store_path=_project_path(project_root, benchmark, "trial_store", "benchmark"),
+        topics_path=_project_path(project_root, benchmark, "topics", "benchmark"),
+        qrels_path=_project_path(project_root, benchmark, "qrels", "benchmark"),
+        baseline_run_path=_project_path(
+            project_root, benchmark, "baseline_run", "benchmark"
+        ),
+        baseline_metrics_path=_project_path(
+            project_root, benchmark, "baseline_metrics", "benchmark"
+        ),
+        model_artifact_path=_project_path(project_root, model, "artifact", "model"),
+        serving_config_path=_project_path(project_root, serving, "config", "serving_headroom"),
+        peak_process_rss_mib=float(peak_process_rss_mib),
+        output_directory=_project_path(
+            project_root, artifacts, "output_directory", "artifacts"
+        ),
+        report_output_path=_project_path(project_root, artifacts, "report", "artifacts"),
+        headroom_output_path=_project_path(
+            project_root, artifacts, "headroom_report", "artifacts"
         ),
         config_path=config_path,
         config_label=config_label,

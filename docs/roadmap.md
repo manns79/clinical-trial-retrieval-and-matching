@@ -59,8 +59,10 @@ Current dense retrieval status:
 
 ## Milestone 4: Reranking
 
-- Add a biomedical cross-encoder over top candidates.
-- Track candidate count, latency, and metric gains.
+- A pinned local ONNX MiniLM cross-encoder baseline evaluates depths 10, 25, and 50 on development
+  topics and records quality deltas, latency, and combined serving memory.
+- The baseline remains evaluation-only because reranking latency exceeds the current API budget.
+- Evaluate a depth-10 quantized/shorter-context or biomedical reranker candidate before serving.
 - Store experiment metadata locally with MLflow.
 
 ## Milestone 5: Grounded Explanations

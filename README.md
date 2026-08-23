@@ -438,6 +438,22 @@ exclude HTTP transport and response serialization. Throughput is sequential sing
 capacity, not a concurrent load-test claim. The exported ONNX artifact must already exist because
 the benchmark forces offline mode; no hosted service or paid API is used.
 
+## Cross-Encoder Reranking Experiment
+
+Run the development-only local reranking sweep after building the selected hybrid run:
+
+```bash
+make download-trec-2021-cross-encoder
+make run-trec-2021-cross-encoder
+make benchmark-trec-2021-cross-encoder-headroom
+```
+
+The tracked experiment reranks the top 10, 25, and 50 hybrid candidates with a pinned FP32 ONNX
+MiniLM cross-encoder. It writes per-depth TREC runs, metrics, diagnostics, metadata/inference/total
+latency, and a separate memory report that loads the selected serving stack first. Trial records,
+model files, run files, and detailed reports stay in ignored directories. The experiment reads
+only development topics and does not change the API retriever modes.
+
 ## Docker Compose Demo
 
 Run the local API + Streamlit UI demo with one command:

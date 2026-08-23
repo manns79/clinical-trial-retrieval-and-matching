@@ -21,6 +21,7 @@ from clinical_trial_matching.evaluation.comparison import (
 )
 from clinical_trial_matching.evaluation.experiments import (
     load_bm25_experiment,
+    load_cross_encoder_experiment,
     load_dense_experiment,
     load_rrf_experiment,
     load_sqlite_fts_experiment,
@@ -30,6 +31,10 @@ from clinical_trial_matching.evaluation.parity import trec_run_parity_report
 from clinical_trial_matching.evaluation.regression import (
     DEFAULT_THRESHOLDS,
     run_bm25_regression_check,
+)
+from clinical_trial_matching.evaluation.reranking import (
+    benchmark_cross_encoder_headroom,
+    run_cross_encoder_experiment,
 )
 from clinical_trial_matching.evaluation.splits import (
     build_trec_topic_split,
@@ -95,6 +100,7 @@ from clinical_trial_matching.retrieval.hybrid import (
     read_trec_rankings,
     reciprocal_rank_fusion,
 )
+from clinical_trial_matching.retrieval.rerank import download_cross_encoder_artifact
 from clinical_trial_matching.retrieval.sqlite_fts import (
     SQLITE_FTS_RETRIEVER_NAME,
     build_sqlite_fts_index,
@@ -369,6 +375,24 @@ def main() -> None:
     run_parity.add_argument("--depth", type=int, default=100)
     run_parity.add_argument("--output", type=Path, required=True)
 
+    cross_encoder_download = subparsers.add_parser(
+        "download-cross-encoder",
+        help="Download a pinned public ONNX cross-encoder into an ignored local artifact.",
+    )
+    cross_encoder_download.add_argument("--config", type=Path, required=True)
+
+    cross_encoder_experiment = subparsers.add_parser(
+        "run-cross-encoder-experiment",
+        help="Rerank a development TREC run at configured candidate depths.",
+    )
+    cross_encoder_experiment.add_argument("--config", type=Path, required=True)
+
+    cross_encoder_headroom = subparsers.add_parser(
+        "benchmark-cross-encoder-headroom",
+        help="Measure cross-encoder memory after loading the selected serving stack.",
+    )
+    cross_encoder_headroom.add_argument("--config", type=Path, required=True)
+
     rrf_experiment = subparsers.add_parser(
         "run-rrf-experiment",
         help="Fuse existing TREC runs with reciprocal-rank fusion and evaluate the result.",
@@ -633,6 +657,12 @@ def main() -> None:
             depth=args.depth,
             output_path=args.output,
         )
+    elif args.command == "download-cross-encoder":
+        download_cross_encoder_command(args.config)
+    elif args.command == "run-cross-encoder-experiment":
+        run_cross_encoder_command(args.config)
+    elif args.command == "benchmark-cross-encoder-headroom":
+        benchmark_cross_encoder_headroom_command(args.config)
     elif args.command == "run-rrf-experiment":
         run_rrf_experiment(args.config)
     elif args.command == "compare-metrics":
@@ -1487,6 +1517,48 @@ def run_rrf_experiment(config_path: Path) -> None:
     print(f"Wrote TREC RRF run file to {experiment.run_output_path}")
     print(f"Wrote TREC RRF metrics report to {experiment.metrics_output_path}")
     print(f"Wrote TREC RRF topic diagnostics to {experiment.diagnostics_output_path}")
+
+
+def download_cross_encoder_command(config_path: Path) -> None:
+    experiment = load_cross_encoder_experiment(config_path)
+    metadata = download_cross_encoder_artifact(
+        model_name=experiment.model_name,
+        model_revision=experiment.model_revision,
+        output_path=experiment.model_artifact_path,
+    )
+    artifact_bytes = sum(
+        int(record["bytes"]) for record in metadata["files"].values()
+    )
+    print(
+        f"Wrote pinned ONNX cross-encoder artifact to {experiment.model_artifact_path} "
+        f"({artifact_bytes / (1024 * 1024):.3f} MiB)"
+    )
+
+
+def run_cross_encoder_command(config_path: Path) -> None:
+    experiment = load_cross_encoder_experiment(config_path)
+    print(f"Running cross-encoder experiment {experiment.name}")
+    report = run_cross_encoder_experiment(experiment)
+    print(f"Wrote cross-encoder report to {experiment.report_output_path}")
+    for depth, result in report["depths"].items():
+        eligible = result["metric_deltas"]["metrics"]["eligible_only"]
+        latency = result["latency_ms_per_topic"]["total"]
+        print(
+            f"depth={depth}: eligible nDCG@10 delta={eligible['ndcg_at_10']:.6f} | "
+            f"eligible MRR delta={eligible['mrr']:.6f} | "
+            f"rerank p95={latency['p95']:.3f} ms"
+        )
+
+
+def benchmark_cross_encoder_headroom_command(config_path: Path) -> None:
+    experiment = load_cross_encoder_experiment(config_path)
+    report = benchmark_cross_encoder_headroom(experiment)
+    print(f"Wrote cross-encoder headroom report to {experiment.headroom_output_path}")
+    print(
+        f"Combined peak RSS: {report['peak_process_rss_mib']} MiB | "
+        f"incremental reranker RSS: {report['incremental_reranker_rss_mib']} MiB | "
+        f"budget passed: {report['budget']['passed']}"
+    )
 
 
 def compare_metrics(

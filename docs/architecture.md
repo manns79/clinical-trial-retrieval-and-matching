@@ -93,6 +93,13 @@ single-process retrieval stack has plausible memory and latency headroom before 
 cross-encoder. A later deployment/load test should measure network serialization, concurrent
 requests, queueing, and worker-level memory duplication separately.
 
+Development-only reranking reads the selected hybrid TREC run, fetches candidate metadata from
+the SQLite trial store, and scores query/trial pairs with a pinned ONNX cross-encoder. Candidate
+depths are evaluated independently; the untouched baseline tail is appended after each reranked
+window. A separate headroom command loads the selected API retrieval stack before the reranker and
+executes real depth probes, preventing standalone model memory from being mistaken for combined
+serving memory. Reranking is not wired into `/search` until quality and latency gates pass.
+
 ## TREC-Style Evaluation
 
 The BM25 benchmark command reads normalized trial JSONL, normalized TREC topic JSONL, and qrels, then writes both a six-column TREC run file and a metrics JSON report. Generated run files and reports belong under ignored `outputs/` paths.
