@@ -36,6 +36,10 @@ from clinical_trial_matching.evaluation.reranking import (
     benchmark_cross_encoder_headroom,
     run_cross_encoder_experiment,
 )
+from clinical_trial_matching.evaluation.reranking_comparison import (
+    build_cross_encoder_comparison,
+    load_cross_encoder_comparison,
+)
 from clinical_trial_matching.evaluation.splits import (
     build_trec_topic_split,
     topic_split_report,
@@ -393,6 +397,12 @@ def main() -> None:
     )
     cross_encoder_headroom.add_argument("--config", type=Path, required=True)
 
+    cross_encoder_comparison = subparsers.add_parser(
+        "compare-cross-encoder-experiments",
+        help="Compare depth-fixed cross-encoder reports against quality and latency gates.",
+    )
+    cross_encoder_comparison.add_argument("--config", type=Path, required=True)
+
     rrf_experiment = subparsers.add_parser(
         "run-rrf-experiment",
         help="Fuse existing TREC runs with reciprocal-rank fusion and evaluate the result.",
@@ -663,6 +673,8 @@ def main() -> None:
         run_cross_encoder_command(args.config)
     elif args.command == "benchmark-cross-encoder-headroom":
         benchmark_cross_encoder_headroom_command(args.config)
+    elif args.command == "compare-cross-encoder-experiments":
+        compare_cross_encoder_experiments_command(args.config)
     elif args.command == "run-rrf-experiment":
         run_rrf_experiment(args.config)
     elif args.command == "compare-metrics":
@@ -1524,6 +1536,7 @@ def download_cross_encoder_command(config_path: Path) -> None:
     metadata = download_cross_encoder_artifact(
         model_name=experiment.model_name,
         model_revision=experiment.model_revision,
+        model_file=experiment.model_file,
         output_path=experiment.model_artifact_path,
     )
     artifact_bytes = sum(
@@ -1559,6 +1572,15 @@ def benchmark_cross_encoder_headroom_command(config_path: Path) -> None:
         f"incremental reranker RSS: {report['incremental_reranker_rss_mib']} MiB | "
         f"budget passed: {report['budget']['passed']}"
     )
+
+
+def compare_cross_encoder_experiments_command(config_path: Path) -> None:
+    comparison = load_cross_encoder_comparison(config_path)
+    report = build_cross_encoder_comparison(comparison)
+    print(f"Wrote cross-encoder comparison report to {comparison.report_path}")
+    print(f"Wrote cross-encoder comparison table to {comparison.table_path}")
+    selected = report["serving_candidate_selected"] or "none"
+    print(f"Serving candidate passing all gates: {selected}")
 
 
 def compare_metrics(

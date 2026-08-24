@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "name": "trec_2021_development_cross_encoder_depth10_optimization",
+  "description": "Depth-10 quantization, context-length, and trial-text optimization comparison.",
+  "project_root": "../../..",
+  "candidate_depth": 10,
+  "baseline": {
+    "label": "fp32_256_core",
+    "report": "outputs/trec_2021_cross_encoder_depth10_fp32_256_core_report.json"
+  },
+  "candidates": [
+    {
+      "label": "int8_256_core",
+      "report": "outputs/trec_2021_cross_encoder_depth10_int8_256_core_report.json"
+    },
+    {
+      "label": "int8_128_core",
+      "report": "outputs/trec_2021_cross_encoder_depth10_int8_128_core_report.json"
+    },
+    {
+      "label": "int8_128_short",
+      "report": "outputs/trec_2021_cross_encoder_depth10_int8_128_short_report.json"
+    }
+  ],
+  "quality_gate": {
+    "eligible_ndcg_at_10_tolerance": 0.0,
+    "broad_ndcg_at_10_tolerance": 0.0
+  },
+  "latency_budget": {
+    "hybrid_p95_ms": 250.0,
+    "reranked_mode_p95_ms": 500.0
+  },
+  "artifacts": {
+    "report": "outputs/trec_2021_cross_encoder_depth10_optimization_report.json",
+    "table": "outputs/trec_2021_cross_encoder_depth10_optimization_table.md"
+  }
+}

@@ -1,7 +1,7 @@
 PYTHON ?= python3
 PYTHONPATH ?= src
 
-.PHONY: install install-dev install-ui install-dense install-onnx test compile ingest-sample ingest-ctgov-sample build-trial-store-sample build-trec-2021-trial-store report-ctgov-sample search-ctgov-sample download-ctgov-small build-trec-corpus-smoke build-bm25-index-sample evaluate-baseline evaluate-trec-bm25-sample compare-metrics-sample split-trec-2021-topics run-trec-2021-bm25 run-trec-2021-fielded-bm25 run-trec-2021-fielded-bm25-candidate run-trec-2021-sqlite-fts5 compare-trec-2021-bm25 compare-trec-2021-lexical-backends evaluate-trec-2021-lexical-holdout run-trec-2021-dense run-trec-2021-dense-biomedical export-trec-2021-onnx-encoder run-trec-2021-dense-onnx check-trec-2021-dense-onnx-parity convert-trec-2021-dense-mmap run-trec-2021-dense-mmap-int8 compare-trec-2021-dense-optimization compare-trec-2021-dense-ablation compare-trec-2021-lexical-dense run-trec-2021-hybrid run-trec-2021-hybrid-sqlite compare-trec-2021-retrievers compare-trec-2021-hybrid-backends download-trec-2021-cross-encoder run-trec-2021-cross-encoder benchmark-trec-2021-cross-encoder-headroom benchmark-trec-2021-serving benchmark-trec-2021-serving-sentence-transformers benchmark-trec-2021-serving-mmap benchmark-trec-2021-serving-mmap-int8 assess-trec-2021-serving-budget benchmark-trec-2021-lexical-backends check-retrieval-regression ingest-trec-sample validate-trec-sample write-manifest-sample api ui docker-up docker-down docker-smoke clean
+.PHONY: install install-dev install-ui install-dense install-onnx test compile ingest-sample ingest-ctgov-sample build-trial-store-sample build-trec-2021-trial-store report-ctgov-sample search-ctgov-sample download-ctgov-small build-trec-corpus-smoke build-bm25-index-sample evaluate-baseline evaluate-trec-bm25-sample compare-metrics-sample split-trec-2021-topics run-trec-2021-bm25 run-trec-2021-fielded-bm25 run-trec-2021-fielded-bm25-candidate run-trec-2021-sqlite-fts5 compare-trec-2021-bm25 compare-trec-2021-lexical-backends evaluate-trec-2021-lexical-holdout run-trec-2021-dense run-trec-2021-dense-biomedical export-trec-2021-onnx-encoder run-trec-2021-dense-onnx check-trec-2021-dense-onnx-parity convert-trec-2021-dense-mmap run-trec-2021-dense-mmap-int8 compare-trec-2021-dense-optimization compare-trec-2021-dense-ablation compare-trec-2021-lexical-dense run-trec-2021-hybrid run-trec-2021-hybrid-sqlite compare-trec-2021-retrievers compare-trec-2021-hybrid-backends download-trec-2021-cross-encoder run-trec-2021-cross-encoder benchmark-trec-2021-cross-encoder-headroom download-trec-2021-cross-encoder-optimization run-trec-2021-cross-encoder-optimization benchmark-trec-2021-serving benchmark-trec-2021-serving-sentence-transformers benchmark-trec-2021-serving-mmap benchmark-trec-2021-serving-mmap-int8 assess-trec-2021-serving-budget benchmark-trec-2021-lexical-backends check-retrieval-regression ingest-trec-sample validate-trec-sample write-manifest-sample api ui docker-up docker-down docker-smoke clean
 
 install:
 	$(PYTHON) -m pip install -e .
@@ -234,6 +234,24 @@ run-trec-2021-cross-encoder: run-trec-2021-hybrid-sqlite
 benchmark-trec-2021-cross-encoder-headroom:
 	PYTHONPATH=$(PYTHONPATH) HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 $(PYTHON) -m clinical_trial_matching.cli benchmark-cross-encoder-headroom \
 		--config configs/experiments/trec_2021/development_cross_encoder_minilm_l6_v2.json
+
+download-trec-2021-cross-encoder-optimization:
+	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m clinical_trial_matching.cli download-cross-encoder \
+		--config configs/experiments/trec_2021/development_cross_encoder_depth10_fp32_256_core.json
+	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m clinical_trial_matching.cli download-cross-encoder \
+		--config configs/experiments/trec_2021/development_cross_encoder_depth10_int8_256_core.json
+
+run-trec-2021-cross-encoder-optimization: run-trec-2021-hybrid-sqlite
+	PYTHONPATH=$(PYTHONPATH) HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 $(PYTHON) -m clinical_trial_matching.cli run-cross-encoder-experiment \
+		--config configs/experiments/trec_2021/development_cross_encoder_depth10_fp32_256_core.json
+	PYTHONPATH=$(PYTHONPATH) HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 $(PYTHON) -m clinical_trial_matching.cli run-cross-encoder-experiment \
+		--config configs/experiments/trec_2021/development_cross_encoder_depth10_int8_256_core.json
+	PYTHONPATH=$(PYTHONPATH) HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 $(PYTHON) -m clinical_trial_matching.cli run-cross-encoder-experiment \
+		--config configs/experiments/trec_2021/development_cross_encoder_depth10_int8_128_core.json
+	PYTHONPATH=$(PYTHONPATH) HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 $(PYTHON) -m clinical_trial_matching.cli run-cross-encoder-experiment \
+		--config configs/experiments/trec_2021/development_cross_encoder_depth10_int8_128_short.json
+	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m clinical_trial_matching.cli compare-cross-encoder-experiments \
+		--config configs/experiments/trec_2021/development_cross_encoder_depth10_optimization.json
 
 compare-trec-2021-hybrid-backends:
 	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m clinical_trial_matching.cli compare-metrics \

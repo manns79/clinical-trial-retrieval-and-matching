@@ -74,6 +74,7 @@ def run_cross_encoder_experiment(
         experiment.model_artifact_path,
         model_name=experiment.model_name,
         model_revision=experiment.model_revision,
+        model_file=experiment.model_file,
         max_length=experiment.max_length,
         framework=framework,
     )
@@ -205,6 +206,8 @@ def run_cross_encoder_experiment(
         "model": {
             "name": experiment.model_name,
             "revision": experiment.model_revision,
+            "file": experiment.model_file,
+            "precision": experiment.model_precision,
             "backend": "onnxruntime",
             "artifact": str(experiment.model_artifact_path),
             "artifact_bytes": _directory_bytes(experiment.model_artifact_path),
@@ -283,6 +286,7 @@ def benchmark_cross_encoder_headroom(
             experiment.model_artifact_path,
             model_name=experiment.model_name,
             model_revision=experiment.model_revision,
+            model_file=experiment.model_file,
             max_length=experiment.max_length,
             framework=framework,
         )
@@ -370,6 +374,8 @@ def _reranker_parameters(
     return {
         "model_name": experiment.model_name,
         "model_revision": experiment.model_revision,
+        "model_file": experiment.model_file,
+        "model_precision": experiment.model_precision,
         "backend": "onnxruntime",
         "candidate_depth": candidate_depth,
         "batch_size": experiment.batch_size,

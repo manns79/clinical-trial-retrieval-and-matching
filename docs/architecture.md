@@ -100,6 +100,12 @@ window. A separate headroom command loads the selected API retrieval stack befor
 executes real depth probes, preventing standalone model memory from being mistaken for combined
 serving memory. Reranking is not wired into `/search` until quality and latency gates pass.
 
+The depth-10 optimization comparison treats serving as a two-part gate. Candidate reports must
+preserve both eligible-only and excluded-or-eligible nDCG@10 gains relative to FP32, while a
+provisional 500 ms reranked-mode p95 budget reserves 250 ms for hybrid retrieval and 250 ms for
+incremental reranking. Quantized model selection, context length, and text representation remain
+versioned experiment inputs rather than API settings until one profile passes both gates.
+
 ## TREC-Style Evaluation
 
 The BM25 benchmark command reads normalized trial JSONL, normalized TREC topic JSONL, and qrels, then writes both a six-column TREC run file and a metrics JSON report. Generated run files and reports belong under ignored `outputs/` paths.

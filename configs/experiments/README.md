@@ -45,3 +45,15 @@ make benchmark-trec-2021-cross-encoder-headroom
 The reranking sweep appends the untouched baseline tail after each reranked candidate window, so
 Recall@100 remains comparable. Cross-encoder experiments remain development-only until both
 quality and serving-resource gates justify a frozen profile.
+
+The depth-10 optimization suite adds official AVX2 int8, 128-token, and shorter-text profiles:
+
+```bash
+make download-trec-2021-cross-encoder-optimization
+make run-trec-2021-cross-encoder-optimization
+```
+
+`development_cross_encoder_depth10_optimization.json` pins the reference report, candidate
+reports, zero-tolerance nDCG preservation gates, and a separate 500 ms reranked-mode p95 budget.
+All four profiles use development topics only. The generated comparison report and table remain
+ignored; the measured decision is recorded in `docs/cross_encoder_latency_optimization.md`.

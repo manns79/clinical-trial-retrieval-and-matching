@@ -41,11 +41,12 @@ class OnnxCrossEncoder:
         *,
         model_name: str,
         model_revision: str,
+        model_file: str,
         max_length: int,
         framework: RerankerFramework,
     ) -> None:
         metadata_path = artifact_path / "metadata.json"
-        model_path = artifact_path / "onnx" / "model.onnx"
+        model_path = artifact_path / model_file
         tokenizer_path = artifact_path / "tokenizer.json"
         missing_files = [
             path.name for path in (metadata_path, model_path, tokenizer_path) if not path.is_file()
@@ -64,12 +65,14 @@ class OnnxCrossEncoder:
             "model_revision": model_revision,
         }
         mismatches = [key for key, value in expected.items() if metadata.get(key) != value]
+        if metadata.get("model_file", "onnx/model.onnx") != model_file:
+            mismatches.append("model_file")
         if mismatches:
             raise ValueError(
                 "Cross-encoder artifact is incompatible with the experiment: "
                 + ", ".join(mismatches)
             )
-        _validate_artifact_checksum(metadata, "onnx/model.onnx", model_path)
+        _validate_artifact_checksum(metadata, model_file, model_path)
         _validate_artifact_checksum(metadata, "tokenizer.json", tokenizer_path)
 
         np = framework.modules["numpy"]
@@ -117,6 +120,7 @@ def download_cross_encoder_artifact(
     *,
     model_name: str,
     model_revision: str,
+    model_file: str,
     output_path: Path,
 ) -> dict[str, Any]:
     try:
@@ -132,7 +136,7 @@ def download_cross_encoder_artifact(
         local_dir=output_path,
         allow_patterns=[
             "config.json",
-            "onnx/model.onnx",
+            model_file,
             "special_tokens_map.json",
             "tokenizer.json",
             "tokenizer_config.json",
@@ -142,7 +146,7 @@ def download_cross_encoder_artifact(
     artifact_files = {}
     for relative_path in (
         "config.json",
-        "onnx/model.onnx",
+        model_file,
         "special_tokens_map.json",
         "tokenizer.json",
         "tokenizer_config.json",
@@ -154,7 +158,7 @@ def download_cross_encoder_artifact(
                 "bytes": path.stat().st_size,
                 "sha256": _sha256_file(path),
             }
-    required = {"config.json", "onnx/model.onnx", "tokenizer.json"}
+    required = {"config.json", model_file, "tokenizer.json"}
     missing = required - set(artifact_files)
     if missing:
         raise ValueError(
@@ -165,6 +169,7 @@ def download_cross_encoder_artifact(
         "backend": "onnxruntime",
         "model_name": model_name,
         "model_revision": model_revision,
+        "model_file": model_file,
         "files": artifact_files,
     }
     (output_path / "metadata.json").write_text(

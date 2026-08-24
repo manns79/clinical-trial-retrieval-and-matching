@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "name": "trec_2021_development_cross_encoder_depth10_int8_256_core",
+  "description": "Depth-10 official AVX2 int8 ONNX cross-encoder with the reference context and text.",
+  "project_root": "../../..",
+  "model": {
+    "name": "cross-encoder/ms-marco-MiniLM-L6-v2",
+    "revision": "233902d25c440f23af6f7d6e94d2946bac0bee0a",
+    "artifact": "data/models/cross-encoder/ms-marco-MiniLM-L6-v2-233902d-int8-avx2",
+    "file": "onnx/model_quint8_avx2.onnx",
+    "precision": "int8",
+    "device": "cpu",
+    "max_length": 256,
+    "batch_size": 16
+  },
+  "reranking": {
+    "candidate_depths": [10],
+    "text_representation": "clinical_core"
+  },
+  "benchmark": {
+    "corpus": "data/processed/clinicaltrials/trec_2021_qrels_trials.jsonl",
+    "trial_store": "data/indexes/trec_2021_trial_metadata.sqlite",
+    "topics": "data/processed/trec/2021/splits/development/topics.jsonl",
+    "qrels": "data/processed/trec/2021/splits/development/qrels.jsonl",
+    "baseline_run": "outputs/trec_2021_development_hybrid_rrf_sqlite_minilm.run",
+    "baseline_metrics": "outputs/trec_2021_development_hybrid_rrf_sqlite_minilm_metrics.json",
+    "top_k": 100
+  },
+  "serving_headroom": {
+    "config": "configs/benchmarks/trec_2021_local_serving.json",
+    "peak_process_rss_mib": 900
+  },
+  "artifacts": {
+    "output_directory": "outputs/cross_encoder/trec_2021_depth10_int8_256_core",
+    "report": "outputs/trec_2021_cross_encoder_depth10_int8_256_core_report.json",
+    "headroom_report": "outputs/trec_2021_cross_encoder_depth10_int8_256_core_headroom.json"
+  }
+}

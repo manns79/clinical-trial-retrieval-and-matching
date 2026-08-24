@@ -62,7 +62,9 @@ Current dense retrieval status:
 - A pinned local ONNX MiniLM cross-encoder baseline evaluates depths 10, 25, and 50 on development
   topics and records quality deltas, latency, and combined serving memory.
 - The baseline remains evaluation-only because reranking latency exceeds the current API budget.
-- Evaluate a depth-10 quantized/shorter-context or biomedical reranker candidate before serving.
+- Depth-10 int8, 128-token, and shorter-text profiles were evaluated; none preserved both nDCG
+  gains while passing the provisional reranked-mode latency budget.
+- Next evaluate sub-10 int8/256 candidate windows before considering a biomedical reranker.
 - Store experiment metadata locally with MLflow.
 
 ## Milestone 5: Grounded Explanations

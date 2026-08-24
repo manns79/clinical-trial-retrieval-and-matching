@@ -454,6 +454,18 @@ latency, and a separate memory report that loads the selected serving stack firs
 model files, run files, and detailed reports stay in ignored directories. The experiment reads
 only development topics and does not change the API retriever modes.
 
+Run the depth-10 quantization/context/text optimization suite with:
+
+```bash
+make download-trec-2021-cross-encoder-optimization
+make run-trec-2021-cross-encoder-optimization
+```
+
+The comparison requires both eligible-only and broad nDCG@10 gains to match the FP32 reference
+and reserves 250 ms p95 for reranking inside a separate 500 ms optional-mode budget. It records a
+compact ignored JSON/Markdown gate report. No current profile passes both gates, so reranking
+remains outside the API.
+
 ## Docker Compose Demo
 
 Run the local API + Streamlit UI demo with one command:

@@ -39,7 +39,11 @@ ONNX artifact occupies 87.696 MiB. Memory is therefore acceptable; latency is th
 
 ## Decision
 
-Do not add this FP32 profile to `/search`. Keep depth 10 as the quality reference and next test a
-portable int8 ONNX export and shorter sequence/text representations. Any serving candidate must
+Do not add this FP32 profile to `/search`. Keep depth 10 as the quality reference and next test an
+official int8 ONNX export and shorter sequence/text representations. Any serving candidate must
 preserve the depth-10 development gain and use an explicit reranked-mode latency budget. The
 general-domain MS MARCO model is a baseline, not evidence of clinical suitability or eligibility.
+
+The follow-up optimization is recorded in `cross_encoder_latency_optimization.md`. The tested
+official AVX2 int8, 128-token, and shorter-text profiles did not pass both quality and latency
+gates, so the serving decision remains unchanged.

@@ -156,6 +156,8 @@ class CrossEncoderExperiment:
     description: str
     model_name: str
     model_revision: str
+    model_file: str
+    model_precision: str
     text_representation: str
     batch_size: int
     device: str
@@ -497,10 +499,31 @@ def load_cross_encoder_experiment(path: Path) -> CrossEncoderExperiment:
     _reject_unknown_fields(
         model,
         "model",
-        {"name", "revision", "artifact", "device", "max_length", "batch_size"},
+        {
+            "name",
+            "revision",
+            "artifact",
+            "file",
+            "precision",
+            "device",
+            "max_length",
+            "batch_size",
+        },
     )
     model_name = _required_string(model, "name")
     model_revision = _required_string(model, "revision")
+    model_file = model.get("file", "onnx/model.onnx")
+    if (
+        not isinstance(model_file, str)
+        or not model_file.strip()
+        or Path(model_file).is_absolute()
+        or ".." in Path(model_file).parts
+    ):
+        raise ValueError("model.file must be a safe relative path")
+    model_file = Path(model_file).as_posix()
+    model_precision = model.get("precision", "fp32")
+    if model_precision not in {"fp32", "int8"}:
+        raise ValueError("model.precision must be fp32 or int8")
     device = _required_string(model, "device")
     if device != "cpu":
         raise ValueError("The local ONNX cross-encoder experiment supports only CPU")
@@ -569,6 +592,8 @@ def load_cross_encoder_experiment(path: Path) -> CrossEncoderExperiment:
         description=description,
         model_name=model_name,
         model_revision=model_revision,
+        model_file=model_file,
+        model_precision=model_precision,
         text_representation=text_representation,
         batch_size=batch_size,
         device=device,
