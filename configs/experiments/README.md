@@ -57,3 +57,14 @@ make run-trec-2021-cross-encoder-optimization
 reports, zero-tolerance nDCG preservation gates, and a separate 500 ms reranked-mode p95 budget.
 All four profiles use development topics only. The generated comparison report and table remain
 ignored; the measured decision is recorded in `docs/cross_encoder_latency_optimization.md`.
+
+The final sub-10 candidate-window gate uses the same int8/256 `clinical_core` artifact:
+
+```bash
+make download-trec-2021-cross-encoder-small-depths
+make run-trec-2021-cross-encoder-small-depths
+```
+
+The comparison spec allows each report entry to select a depth, so depths 3, 5, and 8 are checked
+against the FP32/depth-10 reference without changing the quality or latency gates. No candidate
+passed both gates; reranking remains evaluation-only.

@@ -55,6 +55,20 @@ class CrossEncoderExperimentTest(unittest.TestCase):
         self.assertEqual(experiment.text_representation, "title_summary_conditions")
         self.assertIn("/development/", experiment.topics_path.as_posix())
 
+    def test_small_depth_profile_is_int8_256_clinical_core(self) -> None:
+        experiment = load_cross_encoder_experiment(
+            Path(
+                "configs/experiments/trec_2021/"
+                "development_cross_encoder_int8_256_core_small_depths.json"
+            )
+        )
+
+        self.assertEqual(experiment.candidate_depths, (3, 5, 8))
+        self.assertEqual(experiment.model_precision, "int8")
+        self.assertEqual(experiment.max_length, 256)
+        self.assertEqual(experiment.text_representation, "clinical_core")
+        self.assertIn("/development/", experiment.qrels_path.as_posix())
+
     def test_loader_rejects_unsafe_model_file(self) -> None:
         source = Path(
             "configs/experiments/trec_2021/development_cross_encoder_minilm_l6_v2.json"

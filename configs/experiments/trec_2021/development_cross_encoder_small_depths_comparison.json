@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "name": "trec_2021_development_cross_encoder_small_depths_comparison",
+  "description": "Final small-window int8 reranking gate against the FP32 depth-10 reference.",
+  "project_root": "../../..",
+  "candidate_depth": 10,
+  "baseline": {
+    "label": "fp32_depth10_reference",
+    "report": "outputs/trec_2021_cross_encoder_depth10_fp32_256_core_report.json",
+    "candidate_depth": 10
+  },
+  "candidates": [
+    {
+      "label": "int8_depth3",
+      "report": "outputs/trec_2021_cross_encoder_int8_256_core_small_depths_report.json",
+      "candidate_depth": 3
+    },
+    {
+      "label": "int8_depth5",
+      "report": "outputs/trec_2021_cross_encoder_int8_256_core_small_depths_report.json",
+      "candidate_depth": 5
+    },
+    {
+      "label": "int8_depth8",
+      "report": "outputs/trec_2021_cross_encoder_int8_256_core_small_depths_report.json",
+      "candidate_depth": 8
+    }
+  ],
+  "quality_gate": {
+    "eligible_ndcg_at_10_tolerance": 0.0,
+    "broad_ndcg_at_10_tolerance": 0.0
+  },
+  "latency_budget": {
+    "hybrid_p95_ms": 250.0,
+    "reranked_mode_p95_ms": 500.0
+  },
+  "artifacts": {
+    "report": "outputs/trec_2021_cross_encoder_small_depths_comparison_report.json",
+    "table": "outputs/trec_2021_cross_encoder_small_depths_comparison_table.md"
+  }
+}

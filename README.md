@@ -466,6 +466,17 @@ and reserves 250 ms p95 for reranking inside a separate 500 ms optional-mode bud
 compact ignored JSON/Markdown gate report. No current profile passes both gates, so reranking
 remains outside the API.
 
+The final small-window gate can be reproduced with:
+
+```bash
+make download-trec-2021-cross-encoder-small-depths
+make run-trec-2021-cross-encoder-small-depths
+```
+
+Depths 3 and 5 passed latency but did not preserve both reference nDCG gains. Depth 8 preserved
+both gains but exceeded the incremental reranking allowance. The reranking investigation is now
+closed for this project phase rather than weakening a predeclared gate.
+
 ## Docker Compose Demo
 
 Run the local API + Streamlit UI demo with one command:

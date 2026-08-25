@@ -64,7 +64,9 @@ Current dense retrieval status:
 - The baseline remains evaluation-only because reranking latency exceeds the current API budget.
 - Depth-10 int8, 128-token, and shorter-text profiles were evaluated; none preserved both nDCG
   gains while passing the provisional reranked-mode latency budget.
-- Next evaluate sub-10 int8/256 candidate windows before considering a biomedical reranker.
+- Sub-10 int8/256 depths 3, 5, and 8 were evaluated against the same FP32/depth-10 reference; none
+  passed both predeclared gates.
+- Close reranking for the current project phase and retain the experiment as negative evidence.
 - Store experiment metadata locally with MLflow.
 
 ## Milestone 5: Grounded Explanations

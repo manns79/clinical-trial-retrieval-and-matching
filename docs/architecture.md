@@ -106,6 +106,11 @@ provisional 500 ms reranked-mode p95 budget reserves 250 ms for hybrid retrieval
 incremental reranking. Quantized model selection, context length, and text representation remain
 versioned experiment inputs rather than API settings until one profile passes both gates.
 
+The final small-window comparison supports per-row candidate depths against a fixed reference.
+Depths 3 and 5 met latency but missed quality; depth 8 met quality but missed latency. Because no
+profile passed both predeclared gates, the API has no reranker lifecycle, model load, request mode,
+or response contract. This keeps evaluation code from silently becoming production behavior.
+
 ## TREC-Style Evaluation
 
 The BM25 benchmark command reads normalized trial JSONL, normalized TREC topic JSONL, and qrels, then writes both a six-column TREC run file and a metrics JSON report. Generated run files and reports belong under ignored `outputs/` paths.

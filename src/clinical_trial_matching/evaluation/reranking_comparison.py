@@ -15,6 +15,7 @@ CROSS_ENCODER_COMPARISON_SCHEMA_VERSION = 1
 class CrossEncoderReportSpec:
     label: str
     path: Path
+    candidate_depth: int
 
 
 @dataclass(frozen=True)
@@ -63,12 +64,22 @@ def load_cross_encoder_comparison(path: Path) -> CrossEncoderComparison:
     project_root_value = _required_string(payload, "project_root")
     project_root = (path.parent / project_root_value).resolve()
     candidate_depth = _positive_integer(payload, "candidate_depth")
-    baseline = _report_spec(payload.get("baseline"), project_root, "baseline")
+    baseline = _report_spec(
+        payload.get("baseline"),
+        project_root,
+        "baseline",
+        default_depth=candidate_depth,
+    )
     candidates_value = payload.get("candidates")
     if not isinstance(candidates_value, list) or not candidates_value:
         raise ValueError("candidates must be a non-empty list")
     candidates = tuple(
-        _report_spec(value, project_root, f"candidates[{index}]")
+        _report_spec(
+            value,
+            project_root,
+            f"candidates[{index}]",
+            default_depth=candidate_depth,
+        )
         for index, value in enumerate(candidates_value)
     )
     labels = [baseline.label, *(candidate.label for candidate in candidates)]
@@ -126,15 +137,12 @@ def load_cross_encoder_comparison(path: Path) -> CrossEncoderComparison:
 def build_cross_encoder_comparison(
     comparison: CrossEncoderComparison,
 ) -> dict[str, Any]:
-    baseline_report = _profile_report(
-        comparison.baseline,
-        candidate_depth=comparison.candidate_depth,
-    )
+    baseline_report = _profile_report(comparison.baseline)
     baseline_eligible_gain = baseline_report["eligible_ndcg_at_10_gain"]
     baseline_broad_gain = baseline_report["broad_ndcg_at_10_gain"]
     rows = []
     for spec in (comparison.baseline, *comparison.candidates):
-        row = _profile_report(spec, candidate_depth=comparison.candidate_depth)
+        row = _profile_report(spec)
         row["eligible_gain_change_vs_reference"] = round(
             row["eligible_ndcg_at_10_gain"] - baseline_eligible_gain,
             6,
@@ -174,6 +182,7 @@ def build_cross_encoder_comparison(
             "config_sha256": comparison.config_sha256,
             "scope": "Development topics only; holdout topics are not read.",
             "candidate_depth": comparison.candidate_depth,
+            "reference_depth": comparison.baseline.candidate_depth,
             "baseline_label": comparison.baseline.label,
         },
         "gates": {
@@ -202,13 +211,15 @@ def build_cross_encoder_comparison(
     return report
 
 
-def _profile_report(spec: CrossEncoderReportSpec, *, candidate_depth: int) -> dict[str, Any]:
+def _profile_report(spec: CrossEncoderReportSpec) -> dict[str, Any]:
     report = read_json(spec.path)
     if not isinstance(report, dict):
         raise ValueError(f"Cross-encoder report must be a JSON object: {spec.path}")
-    depth = report.get("depths", {}).get(str(candidate_depth))
+    depth = report.get("depths", {}).get(str(spec.candidate_depth))
     if not isinstance(depth, dict):
-        raise ValueError(f"Report does not contain candidate depth {candidate_depth}: {spec.path}")
+        raise ValueError(
+            f"Report does not contain candidate depth {spec.candidate_depth}: {spec.path}"
+        )
     model = report.get("model")
     if not isinstance(model, dict):
         raise ValueError(f"Report does not contain model metadata: {spec.path}")
@@ -217,6 +228,7 @@ def _profile_report(spec: CrossEncoderReportSpec, *, candidate_depth: int) -> di
     return {
         "label": spec.label,
         "report": str(spec.path),
+        "candidate_depth": spec.candidate_depth,
         "precision": str(model.get("precision", "fp32")),
         "max_length": int(model["max_length"]),
         "text_representation": str(model["text_representation"]),
@@ -238,6 +250,7 @@ def _profile_report(spec: CrossEncoderReportSpec, *, candidate_depth: int) -> di
 def _write_markdown(path: Path, report: dict[str, Any]) -> None:
     columns = (
         "label",
+        "candidate_depth",
         "precision",
         "max_length",
         "text_representation",
@@ -261,13 +274,23 @@ def _write_markdown(path: Path, report: dict[str, Any]) -> None:
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-def _report_spec(value: Any, project_root: Path, prefix: str) -> CrossEncoderReportSpec:
+def _report_spec(
+    value: Any,
+    project_root: Path,
+    prefix: str,
+    *,
+    default_depth: int,
+) -> CrossEncoderReportSpec:
     if not isinstance(value, dict):
         raise ValueError(f"{prefix} must be an object")
-    _reject_unknown(value, {"label", "report"}, prefix)
+    _reject_unknown(value, {"label", "report", "candidate_depth"}, prefix)
+    raw_depth = value.get("candidate_depth", default_depth)
+    if isinstance(raw_depth, bool) or not isinstance(raw_depth, int) or raw_depth < 1:
+        raise ValueError(f"{prefix}.candidate_depth must be a positive integer")
     return CrossEncoderReportSpec(
         label=_required_string(value, "label", prefix),
         path=_project_path(project_root, value, "report", prefix),
+        candidate_depth=raw_depth,
     )
 
 

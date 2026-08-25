@@ -34,8 +34,22 @@ the eligible-only gain and remained too slow.
 ## Decision
 
 Do not enable reranking in `/search` and do not weaken the gates after observing the results. The
-best next latency experiment is a sub-10 candidate-depth ablation using int8/256 `clinical_core`,
-which preserves more clinical evidence than either 128-token profile. Depths such as 3, 5, and 8
-should be compared against the same FP32 depth-10 quality reference. The selected official int8
-file requires AVX2; any eventual deployment image must verify that CPU capability or provide a
-different architecture-specific artifact.
+selected official int8 file requires AVX2; any eventual deployment image must verify that CPU
+capability or provide a different architecture-specific artifact.
+
+## Final small-window gate
+
+On 2026-08-25, int8/256 `clinical_core` depths 3, 5, and 8 were compared with the same FP32/depth-10
+quality reference and zero-tolerance gates.
+
+| depth | eligible nDCG@10 gain | broad nDCG@10 gain | reranker p95 ms | estimated mode p95 ms | quality | latency | adopt |
+| ---: | ---: | ---: | ---: | ---: | --- | --- | --- |
+| 3 | +0.001747 | +0.002227 | 153.143 | 403.143 | fail | pass | no |
+| 5 | +0.003243 | +0.002388 | 186.603 | 436.603 | fail | pass | no |
+| 8 | +0.007137 | +0.008893 | 275.995 | 525.995 | pass | fail | no |
+
+No profile passes both gates. Depth 8 is a useful near miss because it improves both quality views,
+but the gate was defined before measurement and is not relaxed afterward. The reranking
+investigation is therefore closed for the current project phase. The code and experiment records
+remain reproducible evidence, while `/search` continues to expose only lexical, dense, and hybrid
+retrieval.

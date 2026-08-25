@@ -25,6 +25,21 @@ class CrossEncoderComparisonTest(unittest.TestCase):
         self.assertEqual(comparison.broad_ndcg_tolerance, 0.0)
         self.assertEqual(comparison.hybrid_p95_ms, 250.0)
         self.assertEqual(comparison.reranked_p95_budget_ms, 500.0)
+        self.assertEqual(comparison.baseline.candidate_depth, 10)
+
+    def test_small_depth_suite_compares_each_depth_with_depth_ten(self) -> None:
+        comparison = load_cross_encoder_comparison(
+            Path(
+                "configs/experiments/trec_2021/"
+                "development_cross_encoder_small_depths_comparison.json"
+            )
+        )
+
+        self.assertEqual(comparison.baseline.candidate_depth, 10)
+        self.assertEqual(
+            tuple(candidate.candidate_depth for candidate in comparison.candidates),
+            (3, 5, 8),
+        )
 
     def test_comparison_requires_quality_and_latency_gates(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -65,6 +80,7 @@ class CrossEncoderComparisonTest(unittest.TestCase):
 
             self.assertFalse(report["rows"][1]["latency_gate_passed"])
             self.assertTrue(report["rows"][1]["quality_gate_passed"])
+            self.assertEqual(report["rows"][1]["candidate_depth"], 10)
             self.assertEqual(report["passing_candidates"], ["passing"])
             saved_report = read_json(root / "output.json")
             self.assertEqual(saved_report["serving_candidate_selected"], "passing")
